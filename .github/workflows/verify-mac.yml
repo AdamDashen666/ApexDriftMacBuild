@@ -55,6 +55,18 @@ jobs:
           # 构建机是全新的：跑分模式不该写出存档
           if find ~/Library -name "ApexDriftProfile_v2.sav" 2>/dev/null | grep -q .; then echo "::warning::跑分写了存档"; else echo "跑分没有写存档"; fi
 
+      # 三圈竞速真正跑完到结算（最短的黑潮港湾，Windows 上约 3.5 分钟）；旧版程序不认 -ApexBenchRace，只会跑一圈、没有 race.txt
+      - name: Three-lap race to the finish screen (no rendering)
+        continue-on-error: true
+        run: |
+          T0=$(date +%s)
+          "$BIN" -nullrhi -unattended -UseFixedTimeStep -ApexBench -ApexBenchRace -ApexBenchSpeed=330 -ApexBenchSecs=600 -ApexMap=KuroshioCircuit -ApexBenchLabel=mac_race > "$OUT/verify/run_race.log" 2>&1 &
+          P=$!
+          for i in $(seq 1 900); do kill -0 $P 2>/dev/null || break; sleep 1; done
+          if kill -0 $P 2>/dev/null; then kill -9 $P; echo "15 分钟没结束，已强制关闭"; else wait $P; echo "退出码 $?，用时 $(( $(date +%s) - T0 )) 秒"; fi
+          find ~/Library -path "*ApexDrift*" -name "mac_race*" -type f 2>/dev/null | while read f; do cp "$f" "$OUT/verify/"; done
+          cat "$OUT"/verify/mac_race_race.txt 2>/dev/null || echo "::warning::没有三圈完赛结果（程序太旧，或没跑完）"
+
       # dmg 里给玩家的性能测试脚本：用无渲染模式、两项短测试完整跑一遍（找 App、启动、收结果、出汇总表）
       - name: Perf script self-test (no rendering)
         continue-on-error: true
