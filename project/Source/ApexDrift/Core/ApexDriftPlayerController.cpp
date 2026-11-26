@@ -1084,6 +1084,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 	static double StepStart = 0.0;
 	static TArray<FString> Out;
 	static int32 Fails = 0;
+	static uint64 StepFrame = 0;   // 每步至少等 10 帧：刚打完包首次启动要编着色器，帧率很低，只按秒等会在界面刷新前就按键
 	const double Now = FPlatformTime::Seconds();
 	if (StepStart == 0.0) StepStart = Now;
 	const double E = Now - StepStart;
@@ -1106,13 +1107,14 @@ void AApexDriftPlayerController::TickVerifyKeys()
 	{
 		return FString::Printf(TEXT("油门=%s 刹车=%s 手刹=%s 视角=%s"), *ApexKeys::Name(EApexBind::Throttle), *ApexKeys::Name(EApexBind::Brake), *ApexKeys::Name(EApexBind::Handbrake), *ApexKeys::Name(EApexBind::Camera));
 	};
-	auto Next = [&]() { ++Step; StepStart = Now; };
+	auto Next = [&]() { ++Step; StepStart = Now; StepFrame = GFrameCounter; };
+	auto Ok = [&](double Secs) { return E > Secs && GFrameCounter - StepFrame >= 10; };
 	SApexSettings* Set = SettingsWidget ? static_cast<SApexSettings*>(SettingsWidget->GetScreen()) : nullptr;
 	const FApexDriftTelemetry& T = VehiclePawn->GetTelemetry();
 	switch (Step)
 	{
 	case 0:
-		if (E > 5.0)
+		if (Ok(5.0))
 		{
 			ApexKeys::ResetAll(SaveData);
 			ApplyKeyBindings();
@@ -1120,12 +1122,12 @@ void AApexDriftPlayerController::TickVerifyKeys()
 			Next();
 		}
 		break;
-	case 1: if (E > 1.0 && Set) { Set->DebugSetTab(3); Next(); } break;
-	case 2: if (E > 1.0) { Shot(TEXT("keys_01_page.png")); Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Throttle)); Next(); } break;
-	case 3: if (E > 0.8) { Shot(TEXT("keys_02_capture.png")); Next(); } break;
-	case 4: if (E > 0.6) { Tap(EKeys::I); Next(); } break;
+	case 1: if (Ok(1.0) && Set) { Set->DebugSetTab(3); Next(); } break;
+	case 2: if (Ok(1.0)) { Shot(TEXT("keys_01_page.png")); Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Throttle)); Next(); } break;
+	case 3: if (Ok(0.8)) { Shot(TEXT("keys_02_capture.png")); Next(); } break;
+	case 4: if (Ok(0.6)) { Tap(EKeys::I); Next(); } break;
 	case 5:
-		if (E > 0.6)
+		if (Ok(0.6))
 		{
 			Check(ApexKeys::Get(EApexBind::Throttle) == EKeys::I, TEXT("设置页按 I：油门改成 I  ") + Binds());
 			Shot(TEXT("keys_03_bound.png"));
@@ -1133,9 +1135,9 @@ void AApexDriftPlayerController::TickVerifyKeys()
 			Next();
 		}
 		break;
-	case 6: if (E > 0.5) { Tap(EKeys::I); Next(); } break;   // I 已是油门：应互换
+	case 6: if (Ok(0.5)) { Tap(EKeys::I); Next(); } break;   // I 已是油门：应互换
 	case 7:
-		if (E > 0.6)
+		if (Ok(0.6))
 		{
 			Check(ApexKeys::Get(EApexBind::Brake) == EKeys::I && ApexKeys::Get(EApexBind::Throttle) == EKeys::S, TEXT("刹车也按 I：两者互换（油门=S）  ") + Binds());
 			Shot(TEXT("keys_04_swap.png"));
@@ -1143,19 +1145,19 @@ void AApexDriftPlayerController::TickVerifyKeys()
 			Next();
 		}
 		break;
-	case 8: if (E > 0.5) { Tap(EKeys::Escape); Next(); } break;
+	case 8: if (Ok(0.5)) { Tap(EKeys::Escape); Next(); } break;
 	case 9:
-		if (E > 0.5)
+		if (Ok(0.5))
 		{
 			Check(ApexKeys::Get(EApexBind::Handbrake) == EKeys::SpaceBar && SettingsWidget->IsVisible(), TEXT("改手刹时按 Esc：取消、设置页没关  ") + Binds());
 			Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Camera));
 			Next();
 		}
 		break;
-	case 10: if (E > 0.5) { Tap(EKeys::P); Tap(EKeys::Up); Next(); } break;   // 保留键：应拒绝并继续等
-	case 11: if (E > 0.5) { Shot(TEXT("keys_05_reserved.png")); Tap(EKeys::LeftShift); Next(); } break;
+	case 10: if (Ok(0.5)) { Tap(EKeys::P); Tap(EKeys::Up); Next(); } break;   // 保留键：应拒绝并继续等
+	case 11: if (Ok(0.5)) { Shot(TEXT("keys_05_reserved.png")); Tap(EKeys::LeftShift); Next(); } break;
 	case 12:
-		if (E > 0.6)
+		if (Ok(0.6))
 		{
 			Check(ApexKeys::Get(EApexBind::Camera) == EKeys::LeftShift, TEXT("视角先按 P、↑（拒绝）再按左 Shift：视角=左 Shift  ") + Binds());
 			Shot(TEXT("keys_06_after.png"));
@@ -1163,10 +1165,10 @@ void AApexDriftPlayerController::TickVerifyKeys()
 			Next();
 		}
 		break;
-	case 13: if (E > 0.8) { StartRaceSession(EApexGameModeType::FreeDrift); Next(); } break;
-	case 14: if (CurrentGameState == EApexGameState::Playing && E > 0.5) { Key(EKeys::S, true); Next(); } break;   // S 现在是油门
+	case 13: if (Ok(0.8)) { StartRaceSession(EApexGameModeType::FreeDrift); Next(); } break;
+	case 14: if (CurrentGameState == EApexGameState::Playing && Ok(0.5)) { Key(EKeys::S, true); Next(); } break;   // S 现在是油门
 	case 15:
-		if (E > 2.0)
+		if (Ok(2.0))
 		{
 			Check(T.ThrottleInput > 0.5f && T.SpeedKmh > 15.0f, FString::Printf(TEXT("按住 S 2 秒：油门 %.2f，车速 %.0f"), T.ThrottleInput, T.SpeedKmh));
 			Shot(TEXT("keys_07_hud.png"));
@@ -1176,7 +1178,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 		}
 		break;
 	case 16:
-		if (E > 1.0)
+		if (Ok(1.0))
 		{
 			Check(T.ThrottleInput < 0.05f, FString::Printf(TEXT("按住 W（已解绑）1 秒：油门 %.2f"), T.ThrottleInput));
 			Key(EKeys::W, false);
@@ -1185,7 +1187,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 		}
 		break;
 	case 17:
-		if (E > 1.0)
+		if (Ok(1.0))
 		{
 			Check(T.BrakeInput > 0.5f, FString::Printf(TEXT("按住 I 1 秒：刹车 %.2f"), T.BrakeInput));
 			Key(EKeys::I, false);
@@ -1193,7 +1195,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 		}
 		break;
 	case 18:
-		if (E > 0.5)
+		if (Ok(0.5))
 		{
 			const UApexDriftSaveGame* Disk = Cast<UApexDriftSaveGame>(UGameplayStatics::LoadGameFromSlot(UApexDriftSaveGame::DefaultSlotName, 0));
 			const FKey* Thr = Disk ? Disk->KeyBinds.Find(TEXT("Throttle")) : nullptr;
@@ -1207,7 +1209,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 		}
 		break;
 	case 19:
-		if (E > 1.0)
+		if (Ok(1.0))
 		{
 			Check(T.ThrottleInput > 0.5f && ApexKeys::IsAllDefault(), FString::Printf(TEXT("恢复默认后按住 W：油门 %.2f  "), T.ThrottleInput) + Binds());
 			Key(EKeys::W, false);
@@ -1217,7 +1219,7 @@ void AApexDriftPlayerController::TickVerifyKeys()
 			Next();
 		}
 		break;
-	case 20: if (E > 1.0) { Next(); FPlatformMisc::RequestExit(false); } break;
+	case 20: if (Ok(1.0)) { Next(); FPlatformMisc::RequestExit(false); } break;
 	default: break;
 	}
 }
