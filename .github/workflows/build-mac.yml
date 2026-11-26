@@ -96,10 +96,17 @@ jobs:
           cd "$UE"
           T0=$(date +%s)
           set +e
+          # 每 5 分钟在公开日志里报一次进度：只打印 UBT 的 [已完成/总数] 计数，不打印任何源码内容
+          ( while sleep 300; do
+              P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log" 2>/dev/null | tail -1)
+              echo "进度 $(( ($(date +%s) - T0) / 60 )) 分钟：编译 ${P:-尚未开始}"
+            done ) &
+          PROG=$!
           ./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun -project="$PROJ/ApexDrift.uproject" -noP4 -platform=Mac \
             -clientconfig=Shipping -build -skipcook -stage -pak -iostore -package -archive -archivedirectory="$OUT/archive" \
             -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
           CODE=$?
+          kill $PROG 2>/dev/null
           echo "UAT 退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
           grep -c -E "\] Compile " "$OUT/logs/uat.log" | sed 's/^/编译步骤数 /' || true
           grep -E "BUILD (SUCCESSFUL|FAILED)|AutomationTool exiting|Total execution time|Result: " "$OUT/logs/uat.log" | tail -10
