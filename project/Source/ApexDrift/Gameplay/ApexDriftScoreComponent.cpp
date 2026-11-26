@@ -35,6 +35,7 @@ void UApexDriftScoreComponent::ResetSession(EApexGameModeType ModeType, AApexTra
 	TotalLaps = 3;
 	CurrentLapTime = 0.0f;
 	BestLapTime = 0.0f;
+	SessionTime = 0.0f;
 	SessionTimeRemaining = (ModeType == EApexGameModeType::DriftAttack3Min) ? 180.0f : 0.0f;
 
 	LastTrackDistance = 0.0f;
@@ -74,6 +75,7 @@ void UApexDriftScoreComponent::UpdateScoring(float DeltaSeconds, float SpeedKmh,
 
 	// Mode timers & Lap progression
 	CurrentLapTime += DeltaSeconds;
+	SessionTime += DeltaSeconds;
 	if (GameModeType == EApexGameModeType::DriftAttack3Min)
 	{
 		SessionTimeRemaining = FMath::Max(0.0f, SessionTimeRemaining - DeltaSeconds);

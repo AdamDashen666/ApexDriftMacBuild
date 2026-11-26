@@ -3,6 +3,8 @@
 #include "Track/ApexPropField.h"
 #include "Core/ApexDriftPlayerController.h"
 #include "Core/ApexMapRegistry.h"
+#include "Core/ApexKeyBindings.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Vehicle/ApexDriftVehiclePawn.h"
 #include "Track/ApexTrackSplineActor.h"
 #include "Components/SplineComponent.h"
@@ -47,6 +49,7 @@ void UApexBenchSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	bShotUI = !FParse::Param(FCommandLine::Get(), TEXT("ApexBenchNoUI"));
 	bPad = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchPad"));
 	bAuto = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchAuto"));
+	bRace = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchRace"));
 	bKeys = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchKeys"));
 	bMonkey = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchMonkey"));
 	FParse::Value(FCommandLine::Get(), TEXT("ApexBenchSecs="), MaxSecs);
@@ -76,7 +79,7 @@ void UApexBenchSubsystem::Tick(float DeltaTime)
 		// 预热：等流送与 PSO 缓存，菜单环视画面本身也算预热
 		if (Now - PhaseStart > 7.0)
 		{
-			if (bAuto) PC->StartAutoRun(); else PC->StartRaceSession(EApexGameModeType::FreeDrift);
+			if (bAuto) PC->StartAutoRun(); else PC->StartRaceSession(bRace ? EApexGameModeType::Circuit3Laps : EApexGameModeType::FreeDrift);
 			if (bPad)
 			{
 				AStaticMeshActor* Floor = GetWorld()->SpawnActor<AStaticMeshActor>(FVector(0.0f, 0.0f, 150000.0f), FRotator::ZeroRotator);
@@ -129,6 +132,12 @@ void UApexBenchSubsystem::Tick(float DeltaTime)
 		DriveRamps(DeltaTime);
 		return;
 	}
+	static const bool bResetR = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchResetR"));
+	if (bResetR)
+	{
+		DriveResetR(DeltaTime);
+		return;
+	}
 	if (bAuto)
 	{
 		AApexDriftVehiclePawn* Car = PC->GetVehiclePawn();
@@ -147,8 +156,39 @@ void UApexBenchSubsystem::Tick(float DeltaTime)
 			return;
 		}
 	}
+	else if (bRace && PC->GetGameState() == EApexGameState::Finished)
+	{
+		// 正常完赛：最后一圈记下，等结算画面动画放完截图，再写结果退出
+		if (RaceDoneT < 0.0f)
+		{
+			RaceDoneT = 0.0f;
+			RaceLaps.Add(Elapsed - RaceLapStart);
+		}
+		RaceDoneT += DeltaTime;
+		if (RaceDoneT > 3.0f && !bRaceShot)
+		{
+			bRaceShot = true;
+			FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Bench/%s_race_finish.png"), *Label)), true, false);
+		}
+		if (RaceDoneT > 4.5f)
+		{
+			WriteRace(true);
+			Finish();
+			Phase = 3;
+		}
+		return;
+	}
 	else
-	Drive(DeltaTime);
+	{
+		Drive(DeltaTime);
+		const int32 Lap = PC->GetVehiclePawn()->GetTelemetry().CurrentLap;
+		if (bRace && Lap != RaceLastLap)
+		{
+			RaceLaps.Add(Elapsed - RaceLapStart);
+			RaceLapStart = Elapsed;
+			RaceLastLap = Lap;
+		}
+	}
 
 	// ---- 采样（截图后 0.6 秒内的帧不计） ----
 	ShotCooldown = FMath::Max(0.0f, ShotCooldown - DeltaTime);
@@ -185,11 +225,104 @@ void UApexBenchSubsystem::Tick(float DeltaTime)
 	}
 
 	const float TrackLen = PC->GetTrackActor() ? PC->GetTrackActor()->GetTrackLength() : 0.0f;
-	if (Elapsed >= MaxSecs || (TrackLen > 0.0f && Travelled > TrackLen * 1.01f))
+	if (Elapsed >= MaxSecs || (!bRace && TrackLen > 0.0f && Travelled > TrackLen * 1.01f))
 	{
+		if (bRace) WriteRace(false);
 		Finish();
 		Phase = 3;
 	}
+}
+
+void UApexBenchSubsystem::DriveResetR(float DeltaTime)
+{
+	AApexDriftPlayerController* PC = Cast<AApexDriftPlayerController>(GetWorld()->GetFirstPlayerController());
+	AApexDriftVehiclePawn* Car = PC ? PC->GetVehiclePawn() : nullptr;
+	if (!Car) return;
+	AApexPropField* Field = nullptr;
+	for (TActorIterator<AApexPropField> It(GetWorld()); It; ++It) { Field = *It; break; }
+	const FKey RKey = ApexKeys::Get(EApexBind::Reset);
+	auto Key = [](const FKey& K, bool bDown)
+	{
+		const FKeyEvent Ev(K, FModifierKeysState(), 0, false, 0, 0);
+		if (bDown) FSlateApplication::Get().ProcessKeyDownEvent(Ev); else FSlateApplication::Get().ProcessKeyUpEvent(Ev);
+	};
+	auto Check = [&](bool bOk, const FString& What)
+	{
+		if (!bOk) ++RFails;
+		RLog.Add(FString::Printf(TEXT("%s  %s"), bOk ? TEXT("PASS") : TEXT("FAIL"), *What));
+	};
+	auto Next = [&]() { ++RStep; RStepT = 0.0f; RFrames = 0; };
+	RStepT += DeltaTime;
+	++RFrames;
+	const float FromStart = FVector::Dist2D(Car->GetActorLocation(), AutoStart) * 0.01f;
+	const float FromCrash = FVector::Dist2D(Car->GetActorLocation(), RCrash) * 0.01f;
+	const int32 Moved = Field ? Field->CountMoved() : -1;
+	switch (RStep)
+	{
+	case 0:
+	{
+		// 以 120km/h 冲木箱墙（与 -ApexBenchRamps 的“撞木箱墙”同一位置）
+		if (Field) Field->ResetAll();
+		const FRotator Rot(0.0f, 0.0f, 0.0f);
+		Car->SetActorTransform(FTransform(Rot, FVector(6000.0f, -1000.0f, 45.0f)), false, nullptr, ETeleportType::TeleportPhysics);
+		Car->GetMesh()->SetPhysicsLinearVelocity(Rot.Vector() * 140.0f / 0.036f * 0.85f);
+		Car->GetMesh()->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		Next();
+		break;
+	}
+	case 1:
+		if (RStepT > 4.5f)
+		{
+			RCrash = Car->GetActorLocation();
+			Check(Field && Moved > 0, FString::Printf(TEXT("撞木箱墙后有道具被撞离原位：%d 个（共 %d）"), Moved, Field ? Field->Num() : 0));
+			Key(RKey, true);
+			Next();
+		}
+		break;
+	case 2: if (RFrames >= 3) { Key(RKey, false); Next(); } break;
+	case 3:
+		if (RStepT > 1.6f)
+		{
+			Check(FromCrash < 60.0f && FromStart > 30.0f, FString::Printf(TEXT("按一次 %s：就地扶正（离按键处 %.1fm，离起点 %.1fm）"), *ApexKeys::Name(EApexBind::Reset), FromCrash, FromStart));
+			Check(Car->GetActorUpVector().Z > 0.9f, FString::Printf(TEXT("扶正后车身朝上（up.z=%.2f）"), Car->GetActorUpVector().Z));
+			Check(Moved > 0, FString::Printf(TEXT("按一次不复原道具（仍有 %d 个不在原位）"), Moved));
+			Key(RKey, true);
+			Next();
+		}
+		break;
+	case 4: if (RFrames >= 3) { Key(RKey, false); Next(); } break;
+	case 5: if (RStepT > 0.35f) { Key(RKey, true); Next(); } break;
+	case 6: if (RFrames >= 3) { Key(RKey, false); Next(); } break;
+	case 7:
+		if (RStepT > 1.2f)
+		{
+			Check(FromStart < 3.0f, FString::Printf(TEXT("0.35 秒内连按两次：回到起点（离起点 %.1fm）"), FromStart));
+			Check(Moved == 0, FString::Printf(TEXT("连按两次：道具全部复原（不在原位 %d 个）"), Moved));
+			Check(Car->GetTelemetry().SpeedKmh < 5.0f, FString::Printf(TEXT("回起点后静止（%.1f km/h）"), Car->GetTelemetry().SpeedKmh));
+			RLog.Insert(FString::Printf(TEXT("%s 训练场复位键：%s（%d 项失败）"), *Label, RFails ? TEXT("有失败") : TEXT("全部通过"), RFails), 0);
+			FFileHelper::SaveStringArrayToFile(RLog, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Bench/%s_resetr.txt"), *Label)), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			Finish();
+			Phase = 3;
+		}
+		break;
+	default: break;
+	}
+}
+
+void UApexBenchSubsystem::WriteRace(bool bFinished)
+{
+	AApexDriftPlayerController* PC = Cast<AApexDriftPlayerController>(GetWorld()->GetFirstPlayerController());
+	const FApexDriftTelemetry& Tel = PC->GetVehiclePawn()->GetTelemetry();
+	const float TrackLen = PC->GetTrackActor() ? PC->GetTrackActor()->GetTrackLength() : 0.0f;
+	FString Laps;
+	float Sum = 0.0f;
+	for (float T : RaceLaps) { Laps += FString::Printf(TEXT("%.2f "), T); Sum += T; }
+	TArray<FString> Out;
+	Out.Add(FString::Printf(TEXT("%s 三圈竞速 完赛=%d 状态=%d 圈数显示 %d/%d 各圈 %s合计 %.2fs（结算总用时 %.2fs） 最快圈 %.2fs 得分 %d 行驶 %.0fm（赛道 %.0fm × %.2f） 复位 %d 掉头 %d 结算截图=%d"),
+		*Label, bFinished ? 1 : 0, static_cast<int32>(PC->GetGameState()), Tel.CurrentLap, Tel.TotalLaps, *Laps, Sum, Tel.SessionTime, Tel.BestLapTime, Tel.TotalScore,
+		Travelled * 0.01f, TrackLen * 0.01f, TrackLen > 0.0f ? Travelled / TrackLen : 0.0f, Resets, Spins, bRaceShot ? 1 : 0));
+	FFileHelper::SaveStringArrayToFile(Out, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Bench/%s_race.txt"), *Label)), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	UE_LOG(LogTemp, Display, TEXT("[ApexBench] %s"), *Out[0]);
 }
 
 void UApexBenchSubsystem::Drive(float DeltaTime)

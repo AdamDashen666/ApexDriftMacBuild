@@ -47,6 +47,7 @@ public:
 	float GetCurrentLapTime() const { return CurrentLapTime; }
 	float GetBestLapTime() const { return BestLapTime; }
 	float GetSessionTimeRemaining() const { return SessionTimeRemaining; }
+	float GetSessionTime() const { return SessionTime; }
 	bool IsSessionFinished() const { return bSessionFinished; }
 	bool IsWrongWay() const { return bWrongWay; }
 
@@ -84,6 +85,7 @@ private:
 	float CurrentLapTime = 0.0f;
 	float BestLapTime = 0.0f;
 	float SessionTimeRemaining = 180.0f;
+	float SessionTime = 0.0f;
 
 	FString ActiveZoneName;
 	FString CalloutText;

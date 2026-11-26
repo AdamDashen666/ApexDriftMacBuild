@@ -154,16 +154,16 @@ void UApexSettingsWidget::ReleaseSlateResources(bool bReleaseChildren)
 // 结算
 // =========================================================================
 
-void UApexFinishWidget::InitAndShow(AApexDriftPlayerController* InPC, const FApexDriftTelemetry& FinalTelemetry, EApexGameModeType ModeType, bool bInNewRecord)
+void UApexFinishWidget::InitAndShow(AApexDriftPlayerController* InPC, const FApexDriftTelemetry& FinalTelemetry, EApexGameModeType ModeType, int32 InRecordFlags)
 {
 	OwnerPC = InPC;
 	Telemetry = FinalTelemetry;
 	Mode = ModeType;
-	bNewRecord = bInNewRecord;
+	RecordFlags = InRecordFlags;
 	if (Screen.IsValid())
 	{
 		Screen->SetPlayer(InPC, InPC ? InPC->GetSaveData() : nullptr);
-		Screen->SetResult(Telemetry, Mode, bNewRecord);
+		Screen->SetResult(Telemetry, Mode, RecordFlags);
 	}
 }
 
@@ -179,7 +179,7 @@ TSharedRef<SWidget> UApexFinishWidget::RebuildWidget()
 {
 	Screen = SNew(SApexFinish);
 	Screen->SetPlayer(OwnerPC, OwnerPC ? OwnerPC->GetSaveData() : nullptr);
-	Screen->SetResult(Telemetry, Mode, bNewRecord);
+	Screen->SetResult(Telemetry, Mode, RecordFlags);
 	NotifyScreen(Screen.Get(), GetVisibility());
 	return Screen.ToSharedRef();
 }

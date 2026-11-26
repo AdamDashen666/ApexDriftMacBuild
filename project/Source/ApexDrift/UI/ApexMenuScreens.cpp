@@ -1033,11 +1033,11 @@ void SApexPauseMenu::PaintScreen(FApexPainter& P, const FVector2f& S) const
 // 结算
 // =========================================================================
 
-void SApexFinish::SetResult(const FApexDriftTelemetry& T, EApexGameModeType M, bool bRecord)
+void SApexFinish::SetResult(const FApexDriftTelemetry& T, EApexGameModeType M, int32 InRecordFlags)
 {
 	Tel = T;
 	Mode = M;
-	bNewRecord = bRecord;
+	RecordFlags = InRecordFlags;
 }
 
 void SApexFinish::OnShown()
@@ -1152,7 +1152,8 @@ void SApexFinish::PaintScreen(FApexPainter& P, const FVector2f& S) const
 	P.Text(TEXT("总得分"), X0 + 2.0f, 352.0f, EApexFont::Body, 22.0f, TextMid());
 	const float SW = P.Text(FormatScore(FMath::RoundToInt(ShownScore)), X0 - 4.0f, 506.0f, EApexFont::NumHeavy, 168.0f, TextHi(), EApexH::Left, EApexV::Baseline, 0, 0.3f);
 
-	if (bNewRecord)
+	// 得分纪录才把“新纪录”放在总得分旁；单漂、圈速纪录标在下面对应的格子上
+	if (RecordFlags & ApexRecordFlags::Score)
 	{
 		const float BT = (OpenT - 2.0f) / 0.4f;
 		if (BT > 0.0f)
@@ -1170,25 +1171,38 @@ void SApexFinish::PaintScreen(FApexPainter& P, const FVector2f& S) const
 	}
 
 	// 统计
-	struct FStat { const TCHAR* L; FString V; };
-	const FStat St[4] = {
-		{ TEXT("最佳单漂"), FormatScore(Tel.BestSingleDrift) },
-		{ TEXT("最大角度"), FString::Printf(TEXT("%.0f°"), Tel.PeakAngleDeg) },
-		{ TEXT("最高倍率"), FString::Printf(TEXT("×%.1f"), Tel.MaxDriftCombo) },
-		{ TEXT("最快圈"), FormatTimeOrDash(Tel.BestLapTime) },
-	};
+	struct FStat { const TCHAR* L; FString V; bool bRecord; };
+	TArray<FStat, TInlineAllocator<5>> St;
+	St.Add({ TEXT("最佳单漂"), FormatScore(Tel.BestSingleDrift), (RecordFlags & ApexRecordFlags::SingleDrift) != 0 });
+	St.Add({ TEXT("最大角度"), FString::Printf(TEXT("%.0f°"), Tel.PeakAngleDeg), false });
+	St.Add({ TEXT("最高倍率"), FString::Printf(TEXT("×%.1f"), Tel.MaxDriftCombo), false });
+	if (Mode == EApexGameModeType::Circuit3Laps)
+	{
+		St.Add({ TEXT("总用时"), FormatTimeOrDash(Tel.SessionTime), false });
+	}
+	St.Add({ TEXT("最快圈"), FormatTimeOrDash(Tel.BestLapTime), (RecordFlags & ApexRecordFlags::Lap) != 0 });
 	const float SY = 588.0f;
-	const float CellW = 214.0f;
-	for (int32 i = 0; i < 4; ++i)
+	const float CellW = St.Num() > 4 ? 170.0f : 214.0f;   // 五格时收窄，总宽不变
+	const float TagT = (OpenT - 2.0f) / 0.4f;
+	for (int32 i = 0; i < St.Num(); ++i)
 	{
 		const float T = EaseOut((OpenT - 0.5f - i * 0.08f) / 0.4f);
 		const float Old = P.GetAlpha();
 		P.SetAlpha(Old * T);
 		const FApexRect C(X0 + 8.0f + i * (CellW + 14.0f), SY + 16.0f * (1.0f - T), CellW, 112.0f);
 		P.Skew(C, Paper(0.08f));
-		P.Skew(FApexRect(C.X, C.Y, 5.0f, C.H), Accent);
+		P.Skew(FApexRect(C.X, C.Y, 5.0f, C.H), St[i].bRecord ? Gold() : Accent);
 		P.Text(St[i].L, C.X + 32.0f, C.Y + 34.0f, EApexFont::Body, 18.0f, TextMid());
-		P.TextFit(St[i].V, C.X + 26.0f, C.Y + 75.0f, EApexFont::Num, 42.0f, CellW - 44.0f, TextHi());
+		P.TextFit(St[i].V, C.X + 26.0f, C.Y + 75.0f, EApexFont::Num, 42.0f, CellW - 44.0f, St[i].bRecord ? Gold() : TextHi());
+		if (St[i].bRecord && TagT > 0.0f)
+		{
+			// 格子右上角的小“新纪录”签
+			const float K = EaseOutBack(TagT);
+			const FApexRect RecTag(C.R() - 86.0f, C.Y - 15.0f + 6.0f * (1.0f - K), 80.0f, 30.0f);
+			P.SetAlpha(Old * T * FMath::Clamp(TagT, 0.0f, 1.0f));
+			P.SkewH(RecTag, Gold(), Hex(0xFFE39A));
+			P.Text(TEXT("新纪录"), RecTag.CX(), RecTag.CY(), EApexFont::Display, 17.0f, Ink(), EApexH::Center);
+		}
 		P.SetAlpha(Old);
 	}
 

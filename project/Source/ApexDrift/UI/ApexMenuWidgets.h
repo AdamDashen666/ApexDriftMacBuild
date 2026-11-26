@@ -89,7 +89,7 @@ class APEXDRIFT_API UApexFinishWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	void InitAndShow(AApexDriftPlayerController* InPC, const FApexDriftTelemetry& FinalTelemetry, EApexGameModeType ModeType, bool bNewRecord);
+	void InitAndShow(AApexDriftPlayerController* InPC, const FApexDriftTelemetry& FinalTelemetry, EApexGameModeType ModeType, int32 RecordFlags);
 	virtual void SetVisibility(ESlateVisibility InVisibility) override;
 	SApexScreen* GetScreen() const;
 
@@ -103,7 +103,7 @@ private:
 
 	FApexDriftTelemetry Telemetry;
 	EApexGameModeType Mode = EApexGameModeType::FreeDrift;
-	bool bNewRecord = false;
+	int32 RecordFlags = 0;
 
 	TSharedPtr<SApexFinish> Screen;
 };

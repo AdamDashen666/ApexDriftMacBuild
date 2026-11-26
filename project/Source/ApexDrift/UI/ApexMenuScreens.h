@@ -102,7 +102,7 @@ class SApexFinish : public SApexScreen
 {
 public:
 	enum EId : int32 { IdRetry = 10, IdChangeMap, IdMenu };
-	void SetResult(const FApexDriftTelemetry& T, EApexGameModeType M, bool bRecord);
+	void SetResult(const FApexDriftTelemetry& T, EApexGameModeType M, int32 InRecordFlags);
 
 protected:
 	virtual void BuildItems(const FVector2f& S) override;
@@ -117,7 +117,7 @@ private:
 	TCHAR Grade() const;
 	FApexDriftTelemetry Tel;
 	EApexGameModeType Mode = EApexGameModeType::FreeDrift;
-	bool bNewRecord = false;
+	int32 RecordFlags = 0;   // ApexRecordFlags
 	float ShownScore = 0.0f;
 	bool bGradeSound = false;
 };

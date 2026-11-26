@@ -958,6 +958,7 @@ void AApexDriftVehiclePawn::Tick(float DeltaSeconds)
 		Telemetry.CurrentLapTime = DriftScoreComp->GetCurrentLapTime();
 		Telemetry.BestLapTime = DriftScoreComp->GetBestLapTime();
 		Telemetry.SessionTimeRemaining = DriftScoreComp->GetSessionTimeRemaining();
+		Telemetry.SessionTime = DriftScoreComp->GetSessionTime();
 	}
 
 	if (TrackSplineActor)

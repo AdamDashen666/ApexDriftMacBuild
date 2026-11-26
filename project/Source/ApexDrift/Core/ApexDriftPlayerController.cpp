@@ -646,39 +646,39 @@ void AApexDriftPlayerController::PlayMenuClickSound()
 	}
 }
 
-bool AApexDriftPlayerController::CommitSessionRecord()
+int32 AApexDriftPlayerController::CommitSessionRecord()
 {
 	if (!SaveData || !VehiclePawn || bAutoSession)
 	{
-		return false;   // 自动驾驶参与的一局不计成绩
+		return 0;   // 自动驾驶参与的一局不计成绩
 	}
 	const FApexDriftTelemetry& Tel = VehiclePawn->GetTelemetry();
-	bool bNewRecord = false;
+	int32 Flags = 0;
 	FApexMapRecord& Rec = SaveData->MapRecords.FindOrAdd(FApexMapRegistry::GetMaps()[CurrentMapIndex].Id);
 	if (CurrentMode == EApexGameModeType::FreeDrift && Tel.TotalScore > Rec.BestFreeDrift)
 	{
 		Rec.BestFreeDrift = Tel.TotalScore;
-		bNewRecord = true;
+		Flags |= ApexRecordFlags::Score;
 	}
 	else if (CurrentMode == EApexGameModeType::DriftAttack3Min && CurrentGameState == EApexGameState::Finished && Tel.TotalScore > Rec.BestAttack)
 	{
 		Rec.BestAttack = Tel.TotalScore;
-		bNewRecord = true;
+		Flags |= ApexRecordFlags::Score;
 	}
 	if (Tel.BestSingleDrift > SaveData->BestSingleDrift)
 	{
 		SaveData->BestSingleDrift = Tel.BestSingleDrift;
-		bNewRecord = true;
+		Flags |= ApexRecordFlags::SingleDrift;
 	}
 	SaveData->PeakDriftAngleDeg = FMath::Max(SaveData->PeakDriftAngleDeg, Tel.PeakAngleDeg);
 	SaveData->BestComboMultiplier = FMath::Max(SaveData->BestComboMultiplier, Tel.MaxDriftCombo);
 	if (Tel.BestLapTime > 0.1f && (Rec.BestLapSec <= 0.0f || Tel.BestLapTime < Rec.BestLapSec))
 	{
 		Rec.BestLapSec = Tel.BestLapTime;
-		bNewRecord = true;
+		Flags |= ApexRecordFlags::Lap;
 	}
 	SaveData->SaveToDisk();
-	return bNewRecord;
+	return Flags;
 }
 
 void AApexDriftPlayerController::OnToggleAuto(const FInputActionValue&)
@@ -806,10 +806,10 @@ void AApexDriftPlayerController::FinishRaceSession()
 	if (VehiclePawn)
 	{
 		VehiclePawn->SetControlsLocked(true);
-		const bool bNewRecord = CommitSessionRecord();
+		const int32 RecordFlags = CommitSessionRecord();
 		if (FinishWidget)
 		{
-			FinishWidget->InitAndShow(this, VehiclePawn->GetTelemetry(), CurrentMode, bNewRecord);
+			FinishWidget->InitAndShow(this, VehiclePawn->GetTelemetry(), CurrentMode, RecordFlags);
 		}
 	}
 	UpdateWidgetVisibility();

@@ -117,7 +117,7 @@ private:
 	void UpdateWidgetVisibility();
 	void FinishRaceSession();
 	/** 把当前局成绩写入存档；返回是否刷新纪录 */
-	bool CommitSessionRecord();
+	int32 CommitSessionRecord();   // 返回 ApexRecordFlags 按位组合，0 = 没破纪录
 	void PlaceVehicleAtStartGrid();
 	void TickVerifyGameplay(float DeltaSeconds);
 	void WriteVerifyReportAndExit();

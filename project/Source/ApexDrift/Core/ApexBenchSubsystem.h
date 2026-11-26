@@ -65,6 +65,20 @@ private:
 	void DriveRamps(float DeltaTime);   // -ApexBenchRamps：训练场逐个坡道冲一遍，量腾空、落地、翻车，再撞道具
 	float RampAir = 0.0f, RampMaxZ = 0.0f, RampMinUp = 1.0f, RampLat = 0.0f, RampMinFps = 0.0f, RampWorstMs = 0.0f;
 	int32 RampShot = 0;
+	bool bRace = false;         // -ApexBenchRace：三圈竞速跑完，等结算画面出来截图，记各圈用时
+	float RaceDoneT = -1.0f;
+	float RaceLapStart = 0.0f;
+	int32 RaceLastLap = 1;
+	bool bRaceShot = false;
+	TArray<float> RaceLaps;
+	void WriteRace(bool bFinished);
+	void DriveResetR(float DeltaTime);   // -ApexBenchResetR：训练场撞散道具后用真实按键按一次 / 连按两次复位键
+	int32 RStep = 0;
+	float RStepT = 0.0f;
+	int32 RFrames = 0;
+	int32 RFails = 0;
+	FVector RCrash = FVector::ZeroVector;
+	TArray<FString> RLog;
 	bool bAuto = false;
 	bool bAutoSeen = false;
 	float AutoDoneT = 0.0f;

@@ -3,6 +3,12 @@
 #include "CoreMinimal.h"
 #include "ApexDriftTypes.generated.h"
 
+/** 一局结束时刷新了哪些纪录（CommitSessionRecord 的返回值，按位） */
+namespace ApexRecordFlags
+{
+	enum : int32 { Score = 1, SingleDrift = 2, Lap = 4 };
+}
+
 UENUM(BlueprintType)
 enum class EApexGameModeType : uint8
 {
@@ -169,6 +175,10 @@ struct FApexDriftTelemetry
 
 	UPROPERTY(BlueprintReadOnly)
 	float SessionTimeRemaining = 0.0f;
+
+	/** 本局从发车起已跑的时间（三圈竞速结算的总用时） */
+	UPROPERTY(BlueprintReadOnly)
+	float SessionTime = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly)
 	FVector2D PlayerMinimapPos = FVector2D(0.5f, 0.5f);
