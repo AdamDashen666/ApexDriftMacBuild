@@ -1,6 +1,7 @@
 #include "Core/ApexDriftPlayerController.h"
 #include "Core/ApexDriftSaveGame.h"
 #include "Core/ApexGraphicsSettingsManager.h"
+#include "Core/ApexKeyBindings.h"
 #include "Core/ApexGameInstance.h"
 #include "Core/ApexMapRegistry.h"
 #include "Core/ApexPaintRegistry.h"
@@ -15,6 +16,7 @@
 #include "UI/ApexHudWidget.h"
 #include "UI/ApexMenuWidgets.h"
 #include "UI/ApexMenuScreens.h"
+#include "UI/ApexSettingsScreen.h"
 #include "Vehicle/ApexDriftVFXComponent.h"
 #include "UnrealClient.h"
 #include "Misc/CommandLine.h"
@@ -76,23 +78,34 @@ void AApexDriftPlayerController::BuildProgrammaticInput()
 	IA_Pause      = MakeAction(TEXT("IA_Pause"), EInputActionValueType::Boolean, true);
 	IA_Look       = MakeAction(TEXT("IA_Look"), EInputActionValueType::Axis2D);
 
+	RebuildKeyMappings();
+}
+
+void AApexDriftPlayerController::RebuildKeyMappings()
+{
+	if (!VehicleIMC)
+	{
+		return;
+	}
+	// 键盘主键来自改键表（ApexKeys），方向键、手柄、Esc / P 固定
+	using ApexKeys::Get;
+	VehicleIMC->UnmapAll();
+
 	// Throttle
-	VehicleIMC->MapKey(IA_Throttle, EKeys::W);
+	VehicleIMC->MapKey(IA_Throttle, Get(EApexBind::Throttle));
 	VehicleIMC->MapKey(IA_Throttle, EKeys::Up);
 	VehicleIMC->MapKey(IA_Throttle, EKeys::Gamepad_RightTriggerAxis);
 
 	// Brake / Reverse
-	VehicleIMC->MapKey(IA_Brake, EKeys::S);
+	VehicleIMC->MapKey(IA_Brake, Get(EApexBind::Brake));
 	VehicleIMC->MapKey(IA_Brake, EKeys::Down);
 	VehicleIMC->MapKey(IA_Brake, EKeys::Gamepad_LeftTriggerAxis);
 
-	// Steering (Negate on A / Left)
+	// Steering (Negate on left keys)
 	UInputModifierNegate* NegateMod = NewObject<UInputModifierNegate>(VehicleIMC);
-	FEnhancedActionKeyMapping& MapA = VehicleIMC->MapKey(IA_Steering, EKeys::A);
-	MapA.Modifiers.Add(NegateMod);
-	FEnhancedActionKeyMapping& MapLeft = VehicleIMC->MapKey(IA_Steering, EKeys::Left);
-	MapLeft.Modifiers.Add(NegateMod);
-	VehicleIMC->MapKey(IA_Steering, EKeys::D);
+	VehicleIMC->MapKey(IA_Steering, Get(EApexBind::SteerLeft)).Modifiers.Add(NegateMod);
+	VehicleIMC->MapKey(IA_Steering, EKeys::Left).Modifiers.Add(NegateMod);
+	VehicleIMC->MapKey(IA_Steering, Get(EApexBind::SteerRight));
 	VehicleIMC->MapKey(IA_Steering, EKeys::Right);
 	UInputModifierDeadZone* StickDead = NewObject<UInputModifierDeadZone>(VehicleIMC);
 	StickDead->LowerThreshold = 0.16f;
@@ -101,28 +114,28 @@ void AApexDriftPlayerController::BuildProgrammaticInput()
 	VehicleIMC->MapKey(IA_Steering, EKeys::Gamepad_LeftX).Modifiers.Add(StickDead);
 
 	// Handbrake
-	VehicleIMC->MapKey(IA_Handbrake, EKeys::SpaceBar);
+	VehicleIMC->MapKey(IA_Handbrake, Get(EApexBind::Handbrake));
 	VehicleIMC->MapKey(IA_Handbrake, EKeys::Gamepad_FaceButton_Bottom);
 	VehicleIMC->MapKey(IA_Handbrake, EKeys::Gamepad_FaceButton_Left);
 
 	// Manual Shift
-	VehicleIMC->MapKey(IA_ShiftUp, EKeys::E);
+	VehicleIMC->MapKey(IA_ShiftUp, Get(EApexBind::ShiftUp));
 	VehicleIMC->MapKey(IA_ShiftUp, EKeys::Gamepad_RightShoulder);
-	VehicleIMC->MapKey(IA_ShiftDown, EKeys::Q);
+	VehicleIMC->MapKey(IA_ShiftDown, Get(EApexBind::ShiftDown));
 	VehicleIMC->MapKey(IA_ShiftDown, EKeys::Gamepad_LeftShoulder);
 
-	// Camera / LookBack / Reset / Lights / Pause
-	VehicleIMC->MapKey(IA_Camera, EKeys::C);
+	// Camera / LookBack / Reset / Lights / Auto / Director / Pause
+	VehicleIMC->MapKey(IA_Camera, Get(EApexBind::Camera));
 	VehicleIMC->MapKey(IA_Camera, EKeys::Gamepad_FaceButton_Top);
-	VehicleIMC->MapKey(IA_LookBack, EKeys::B);
+	VehicleIMC->MapKey(IA_LookBack, Get(EApexBind::LookBack));
 	VehicleIMC->MapKey(IA_LookBack, EKeys::Gamepad_RightThumbstick);
-	VehicleIMC->MapKey(IA_Reset, EKeys::R);
+	VehicleIMC->MapKey(IA_Reset, Get(EApexBind::Reset));
 	VehicleIMC->MapKey(IA_Reset, EKeys::Gamepad_Special_Left);
-	VehicleIMC->MapKey(IA_Headlights, EKeys::H);
+	VehicleIMC->MapKey(IA_Headlights, Get(EApexBind::Headlights));
 	VehicleIMC->MapKey(IA_Headlights, EKeys::Gamepad_DPad_Up);
-	VehicleIMC->MapKey(IA_AutoRun, EKeys::F);
+	VehicleIMC->MapKey(IA_AutoRun, Get(EApexBind::AutoRun));
 	VehicleIMC->MapKey(IA_AutoRun, EKeys::Gamepad_DPad_Down);
-	VehicleIMC->MapKey(IA_Director, EKeys::V);
+	VehicleIMC->MapKey(IA_Director, Get(EApexBind::Director));
 	VehicleIMC->MapKey(IA_Director, EKeys::Gamepad_DPad_Right);
 	VehicleIMC->MapKey(IA_Pause, EKeys::Escape);
 	VehicleIMC->MapKey(IA_Pause, EKeys::P);
@@ -132,11 +145,28 @@ void AApexDriftPlayerController::BuildProgrammaticInput()
 	VehicleIMC->MapKey(IA_Look, EKeys::Mouse2D);
 }
 
+void AApexDriftPlayerController::ApplyKeyBindings()
+{
+	RebuildKeyMappings();
+	if (IsLocalPlayerController())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Sub = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+		{
+			Sub->RequestRebuildControlMappings();
+		}
+	}
+	if (SaveData)
+	{
+		SaveData->SaveToDisk();
+	}
+}
+
 void AApexDriftPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
 	SaveData = UApexDriftSaveGame::LoadOrCreate();
+	ApexKeys::Load(SaveData);
 	CurrentMapIndex = FApexMapRegistry::FindIndexForWorld(GetWorld());
 
 	// Shipping 不接受命令行地图名，跑分/验证用 -ApexMap=MomijiTouge 指定
@@ -866,6 +896,13 @@ void AApexDriftPlayerController::Tick(float DeltaSeconds)
 	}
 	static const bool bCars = FParse::Param(FCommandLine::Get(), TEXT("ApexVerifyCars"));
 	if (bCars) TickVerifyCars();
+	static const bool bKeysTest = FParse::Param(FCommandLine::Get(), TEXT("ApexVerifyKeys"));
+	if (bKeysTest)
+	{
+		bShouldPerformFullTickWhenPaused = true;
+		PrimaryActorTick.bTickEvenWhenPaused = true;
+		TickVerifyKeys();
+	}
 	static const bool bFlow = FParse::Param(FCommandLine::Get(), TEXT("ApexVerifyFlow"));
 	if (bFlow)
 	{
@@ -1037,6 +1074,151 @@ void AApexDriftPlayerController::TickVerifyCars()
 		++Shot;
 		T0 = Now;
 		bSet = false;
+	}
+}
+
+void AApexDriftPlayerController::TickVerifyKeys()
+{
+	// 用真实按键走一遍：设置页改键（互换、取消、拒绝保留键）→ 开车验证新键生效、旧键失效 → 读盘确认存上了 → 恢复默认
+	static int32 Step = 0;
+	static double StepStart = 0.0;
+	static TArray<FString> Out;
+	static int32 Fails = 0;
+	const double Now = FPlatformTime::Seconds();
+	if (StepStart == 0.0) StepStart = Now;
+	const double E = Now - StepStart;
+	if (!VehiclePawn || !SaveData) return;
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("VerificationShots"));
+	IFileManager::Get().MakeDirectory(*Dir, true);
+	auto Shot = [&](const TCHAR* Name) { FScreenshotRequest::RequestScreenshot(Dir / Name, true, false); };
+	auto Key = [](const FKey& K, bool bDown)
+	{
+		const FKeyEvent Ev(K, FModifierKeysState(), 0, false, 0, 0);
+		if (bDown) FSlateApplication::Get().ProcessKeyDownEvent(Ev); else FSlateApplication::Get().ProcessKeyUpEvent(Ev);
+	};
+	auto Tap = [&](const FKey& K) { Key(K, true); Key(K, false); };
+	auto Check = [&](bool bOk, const FString& What)
+	{
+		if (!bOk) ++Fails;
+		Out.Add(FString::Printf(TEXT("%s  %s"), bOk ? TEXT("PASS") : TEXT("FAIL"), *What));
+	};
+	auto Binds = [&]()
+	{
+		return FString::Printf(TEXT("油门=%s 刹车=%s 手刹=%s 视角=%s"), *ApexKeys::Name(EApexBind::Throttle), *ApexKeys::Name(EApexBind::Brake), *ApexKeys::Name(EApexBind::Handbrake), *ApexKeys::Name(EApexBind::Camera));
+	};
+	auto Next = [&]() { ++Step; StepStart = Now; };
+	SApexSettings* Set = SettingsWidget ? static_cast<SApexSettings*>(SettingsWidget->GetScreen()) : nullptr;
+	const FApexDriftTelemetry& T = VehiclePawn->GetTelemetry();
+	switch (Step)
+	{
+	case 0:
+		if (E > 5.0)
+		{
+			ApexKeys::ResetAll(SaveData);
+			ApplyKeyBindings();
+			OpenSettingsMenu();
+			Next();
+		}
+		break;
+	case 1: if (E > 1.0 && Set) { Set->DebugSetTab(3); Next(); } break;
+	case 2: if (E > 1.0) { Shot(TEXT("keys_01_page.png")); Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Throttle)); Next(); } break;
+	case 3: if (E > 0.8) { Shot(TEXT("keys_02_capture.png")); Next(); } break;
+	case 4: if (E > 0.6) { Tap(EKeys::I); Next(); } break;
+	case 5:
+		if (E > 0.6)
+		{
+			Check(ApexKeys::Get(EApexBind::Throttle) == EKeys::I, TEXT("设置页按 I：油门改成 I  ") + Binds());
+			Shot(TEXT("keys_03_bound.png"));
+			Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Brake));
+			Next();
+		}
+		break;
+	case 6: if (E > 0.5) { Tap(EKeys::I); Next(); } break;   // I 已是油门：应互换
+	case 7:
+		if (E > 0.6)
+		{
+			Check(ApexKeys::Get(EApexBind::Brake) == EKeys::I && ApexKeys::Get(EApexBind::Throttle) == EKeys::S, TEXT("刹车也按 I：两者互换（油门=S）  ") + Binds());
+			Shot(TEXT("keys_04_swap.png"));
+			Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Handbrake));
+			Next();
+		}
+		break;
+	case 8: if (E > 0.5) { Tap(EKeys::Escape); Next(); } break;
+	case 9:
+		if (E > 0.5)
+		{
+			Check(ApexKeys::Get(EApexBind::Handbrake) == EKeys::SpaceBar && SettingsWidget->IsVisible(), TEXT("改手刹时按 Esc：取消、设置页没关  ") + Binds());
+			Set->DebugActivate(SApexSettings::IdRow0 + static_cast<int32>(EApexBind::Camera));
+			Next();
+		}
+		break;
+	case 10: if (E > 0.5) { Tap(EKeys::P); Tap(EKeys::Up); Next(); } break;   // 保留键：应拒绝并继续等
+	case 11: if (E > 0.5) { Shot(TEXT("keys_05_reserved.png")); Tap(EKeys::LeftShift); Next(); } break;
+	case 12:
+		if (E > 0.6)
+		{
+			Check(ApexKeys::Get(EApexBind::Camera) == EKeys::LeftShift, TEXT("视角先按 P、↑（拒绝）再按左 Shift：视角=左 Shift  ") + Binds());
+			Shot(TEXT("keys_06_after.png"));
+			CloseSettingsMenu();
+			Next();
+		}
+		break;
+	case 13: if (E > 0.8) { StartRaceSession(EApexGameModeType::FreeDrift); Next(); } break;
+	case 14: if (CurrentGameState == EApexGameState::Playing && E > 0.5) { Key(EKeys::S, true); Next(); } break;   // S 现在是油门
+	case 15:
+		if (E > 2.0)
+		{
+			Check(T.ThrottleInput > 0.5f && T.SpeedKmh > 15.0f, FString::Printf(TEXT("按住 S 2 秒：油门 %.2f，车速 %.0f"), T.ThrottleInput, T.SpeedKmh));
+			Shot(TEXT("keys_07_hud.png"));
+			Key(EKeys::S, false);
+			Key(EKeys::W, true);   // W 已经没有绑定
+			Next();
+		}
+		break;
+	case 16:
+		if (E > 1.0)
+		{
+			Check(T.ThrottleInput < 0.05f, FString::Printf(TEXT("按住 W（已解绑）1 秒：油门 %.2f"), T.ThrottleInput));
+			Key(EKeys::W, false);
+			Key(EKeys::I, true);
+			Next();
+		}
+		break;
+	case 17:
+		if (E > 1.0)
+		{
+			Check(T.BrakeInput > 0.5f, FString::Printf(TEXT("按住 I 1 秒：刹车 %.2f"), T.BrakeInput));
+			Key(EKeys::I, false);
+			Next();
+		}
+		break;
+	case 18:
+		if (E > 0.5)
+		{
+			const UApexDriftSaveGame* Disk = Cast<UApexDriftSaveGame>(UGameplayStatics::LoadGameFromSlot(UApexDriftSaveGame::DefaultSlotName, 0));
+			const FKey* Thr = Disk ? Disk->KeyBinds.Find(TEXT("Throttle")) : nullptr;
+			const FKey* Cam = Disk ? Disk->KeyBinds.Find(TEXT("Camera")) : nullptr;
+			Check(Thr && *Thr == EKeys::S && Cam && *Cam == EKeys::LeftShift && !Disk->KeyBinds.Contains(TEXT("Handbrake")),
+				FString::Printf(TEXT("读盘：存了 %d 项改键（油门=S、视角=左 Shift，手刹没改不存）"), Disk ? Disk->KeyBinds.Num() : -1));
+			ApexKeys::ResetAll(SaveData);
+			ApplyKeyBindings();
+			Key(EKeys::W, true);
+			Next();
+		}
+		break;
+	case 19:
+		if (E > 1.0)
+		{
+			Check(T.ThrottleInput > 0.5f && ApexKeys::IsAllDefault(), FString::Printf(TEXT("恢复默认后按住 W：油门 %.2f  "), T.ThrottleInput) + Binds());
+			Key(EKeys::W, false);
+			ReturnToMainMenu();
+			Out.Insert(FString::Printf(TEXT("改键验证：%s（失败 %d 项）"), Fails == 0 ? TEXT("全部通过") : TEXT("有失败"), Fails), 0);
+			FFileHelper::SaveStringArrayToFile(Out, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Bench/verify_keys.txt")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			Next();
+		}
+		break;
+	case 20: if (E > 1.0) { Next(); FPlatformMisc::RequestExit(false); } break;
+	default: break;
 	}
 }
 

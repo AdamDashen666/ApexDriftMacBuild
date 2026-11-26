@@ -1,4 +1,5 @@
 #include "UI/ApexUIArt.h"
+#include "Core/ApexKeyBindings.h"
 #include "Core/ApexMapRegistry.h"
 
 namespace
@@ -878,7 +879,7 @@ namespace ApexUI
 				P.Arc(Pivot, Rm - 4, 4.0f, PI * 1.02f, A - 0.12f, InkDeep(0.85f));
 				MiniCar(P, C0, A - PI + 0.50f, 0.20f, 1.0f, Paper());
 				P.RoundRect(FApexRect(Pic.X + 16, Pic.Y + 14, 92, 30), 6.0f, WithA(Accent, 0.55f + 0.45f * Pulse));
-				P.Text(TEXT("空格"), Pic.X + 62, Pic.Y + 29, EApexFont::BodyBold, 17, Ink(), EApexH::Center);
+				P.TextFit(ApexKeys::Name(EApexBind::Handbrake), Pic.X + 62, Pic.Y + 29, EApexFont::BodyBold, 17, 84.0f, Ink(), EApexH::Center);
 			}
 			else
 			{
@@ -896,14 +897,14 @@ namespace ApexUI
 				P.Arc(C0 + V2(8, -34), 24, 4.0f, -PI * 0.80f, -PI * 0.10f, WithA(Accent, 0.6f + 0.4f * Pulse));
 				ArrowHead(P, C0 + V2(8, -34) + Dir(-PI * 0.10f) * 24.0f + V2(2, 8), SafeNormal2(V2(0.30f, 0.95f)), 13.0f, Accent);
 				P.RoundRect(FApexRect(Pic.X + 16, Pic.Y + 14, 92, 30), 6.0f, Paper(0.92f));
-				P.Text(TEXT("油门 W"), Pic.X + 62, Pic.Y + 29, EApexFont::BodyBold, 17, Ink(), EApexH::Center);
+				P.TextFit(TEXT("油门 ") + ApexKeys::Name(EApexBind::Throttle), Pic.X + 62, Pic.Y + 29, EApexFont::BodyBold, 17, 84.0f, Ink(), EApexH::Center);
 			}
 			P.PopClip();
 
 			static const TCHAR* Titles[3] = { TEXT("入弯前先打方向"), TEXT("点一下手刹"), TEXT("油门稳住，方向控角") };
-			static const TCHAR* Bodies[3] = {
+			const FString Bodies[3] = {
 				TEXT("车速 70 以上，提前收一点油门，把方向打向弯心，让车头先指进去。"),
-				TEXT("短按空格（手柄 A）约半秒，后轮锁死，车尾就会甩出去。别一直按住。"),
+				FString::Printf(TEXT("短按%s（手柄 A）约半秒，后轮锁死，车尾就会甩出去。别一直按住。"), *ApexKeys::Name(EApexBind::Handbrake)),
 				TEXT("踩住油门、方向继续打向弯心就能一直漂；松方向或反打马上回正。连漂：反方向打，再点一下手刹。") };
 			const float TX = Pic.R() + 24.0f;
 			P.Text(FString::FromInt(Step + 1), TX, R.Y + 46.0f, EApexFont::NumHeavy, 52.0f, Accent);
@@ -918,26 +919,60 @@ namespace ApexUI
 		SectionLabel(P, X, Y + 12, TEXT(""), TEXT("键盘"), TEXT("KEYBOARD"), Accent);
 		constexpr float U = 66.0f, G = 8.0f;
 		const float KX = X, KY = Y + 44;
-		struct FRowDef { float Indent; TArray<FKeyDef> Keys; };
-		static const TArray<FRowDef> Rows = {
-			{ 0.0f, { { TEXT("Esc"), TEXT("暂停") } } },
-			{ 0.0f, { { TEXT("Q"), TEXT("降挡") }, { TEXT("W"), TEXT("油门") }, { TEXT("E"), TEXT("升挡") }, { TEXT("R"), TEXT("复位") }, { TEXT("T"), nullptr }, { TEXT("Y"), nullptr }, { TEXT("U"), nullptr }, { TEXT("I"), nullptr }, { TEXT("O"), nullptr }, { TEXT("P"), TEXT("暂停") } } },
-			{ 22.0f, { { TEXT("A"), TEXT("左转") }, { TEXT("S"), TEXT("刹车") }, { TEXT("D"), TEXT("右转") }, { TEXT("F"), TEXT("自动") }, { TEXT("G"), nullptr }, { TEXT("H"), TEXT("车灯") }, { TEXT("J"), nullptr }, { TEXT("K"), nullptr }, { TEXT("L"), nullptr } } },
-			{ 52.0f, { { TEXT("Z"), nullptr }, { TEXT("X"), nullptr }, { TEXT("C"), TEXT("视角") }, { TEXT("V"), TEXT("运镜") }, { TEXT("B"), TEXT("后视") }, { TEXT("N"), nullptr }, { TEXT("M"), nullptr } } },
+		// 标签按当前键位（可在设置“按键”页改），Esc / P 固定暂停
+		auto LabelOf = [](const FKey& K) -> FString
+		{
+			if (K == EKeys::Escape || K == EKeys::P) return TEXT("暂停");
+			const EApexBind B = ApexKeys::Find(K);
+			return B == EApexBind::Count ? FString() : FString(ApexKeys::Info(B).Short);
 		};
+		auto IsDrive = [](const FKey& K)
+		{
+			const EApexBind B = ApexKeys::Find(K);
+			return B == EApexBind::Throttle || B == EApexBind::Brake || B == EApexBind::SteerLeft || B == EApexBind::SteerRight;
+		};
+		struct FRowDef { float Indent; TArray<const TCHAR*> Keys; };
+		static const TArray<FRowDef> Rows = {
+			{ 0.0f, { TEXT("Escape") } },
+			{ 0.0f, { TEXT("Q"), TEXT("W"), TEXT("E"), TEXT("R"), TEXT("T"), TEXT("Y"), TEXT("U"), TEXT("I"), TEXT("O"), TEXT("P") } },
+			{ 22.0f, { TEXT("A"), TEXT("S"), TEXT("D"), TEXT("F"), TEXT("G"), TEXT("H"), TEXT("J"), TEXT("K"), TEXT("L") } },
+			{ 52.0f, { TEXT("Z"), TEXT("X"), TEXT("C"), TEXT("V"), TEXT("B"), TEXT("N"), TEXT("M") } },
+		};
+		TSet<FKey> Drawn;
 		for (int32 r = 0; r < Rows.Num(); ++r)
 		{
 			float CX = KX + Rows[r].Indent;
-			for (const FKeyDef& K : Rows[r].Keys)
+			for (const TCHAR* Name : Rows[r].Keys)
 			{
-				const FString Key = K.Key;
-				const bool bStrong = (Key == TEXT("W") || Key == TEXT("A") || Key == TEXT("S") || Key == TEXT("D"));
-				DrawKey(P, FApexRect(CX, KY + r * (U + G), U, U), Key, K.Label ? FString(K.Label) : FString(), Accent, bStrong);
+				const FKey K{ FName(Name) };
+				Drawn.Add(K);
+				DrawKey(P, FApexRect(CX, KY + r * (U + G), U, U), ApexKeys::KeyName(K), LabelOf(K), Accent, IsDrive(K));
 				CX += U + G;
 			}
 		}
 		// 空格
-		DrawKey(P, FApexRect(KX + 2 * (U + G) + 8, KY + 4 * (U + G), 4 * U + 3 * G, U), TEXT("空格 Space"), TEXT("手刹（起漂）"), Accent, true);
+		{
+			Drawn.Add(EKeys::SpaceBar);
+			const bool bHand = ApexKeys::Find(EKeys::SpaceBar) == EApexBind::Handbrake;
+			DrawKey(P, FApexRect(KX + 2 * (U + G) + 8, KY + 4 * (U + G), 4 * U + 3 * G, U), TEXT("空格 Space"),
+				bHand ? FString(TEXT("手刹（起漂）")) : LabelOf(EKeys::SpaceBar), Accent, bHand || IsDrive(EKeys::SpaceBar));
+		}
+		// 绑在图上没画出的键（Shift、数字键等）
+		{
+			FString Extra;
+			for (int32 b = 0; b < ApexKeys::Num; ++b)
+			{
+				const FKey K = ApexKeys::Get(static_cast<EApexBind>(b));
+				if (!Drawn.Contains(K))
+				{
+					Extra += FString::Printf(TEXT("%s%s %s"), Extra.IsEmpty() ? TEXT("") : TEXT("  ·  "), *ApexKeys::KeyName(K), ApexKeys::Info(static_cast<EApexBind>(b)).Short);
+				}
+			}
+			if (!Extra.IsEmpty())
+			{
+				P.TextFit(TEXT("其他：") + Extra, KX, KY + 5 * (U + G) + 14.0f, EApexFont::BodyBold, 17.0f, 10 * (U + G), TextMid());
+			}
+		}
 		// 方向键
 		{
 			const float AX = KX + 10 * (U + G) + 34, AY = KY + 2 * (U + G);
@@ -953,7 +988,13 @@ namespace ApexUI
 			ArrowKey(AX, AY + U + G, V2(-1, 0), TEXT("左转"));
 			ArrowKey(AX + U + G, AY + U + G, V2(0, 1), TEXT("刹车"));
 			ArrowKey(AX + 2 * (U + G), AY + U + G, V2(1, 0), TEXT("右转"));
-			P.Text(TEXT("方向键与 WASD 等效"), AX + 1.5f * U + G, AY + 2 * (U + G) + 22, EApexFont::Body, 15.0f, TextLow(), EApexH::Center);
+			P.Text([]
+			{
+				// 默认是 “方向键与 WASD 等效”；改过键时按当前键位写
+				const FString K[4] = { ApexKeys::Name(EApexBind::Throttle), ApexKeys::Name(EApexBind::SteerLeft), ApexKeys::Name(EApexBind::Brake), ApexKeys::Name(EApexBind::SteerRight) };
+				const bool bShort = K[0].Len() == 1 && K[1].Len() == 1 && K[2].Len() == 1 && K[3].Len() == 1;
+				return FString(TEXT("方向键与 ")) + (bShort ? K[0] + K[1] + K[2] + K[3] : FString::Join(TArrayView<const FString>(K, 4), TEXT(" / "))) + TEXT(" 等效");
+			}(), AX + 1.5f * U + G, AY + 2 * (U + G) + 22, EApexFont::Body, 15.0f, TextLow(), EApexH::Center);
 		}
 
 		// ---- 手柄 ----

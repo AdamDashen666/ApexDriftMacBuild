@@ -2,6 +2,7 @@
 #include "UI/ApexUIStyle.h"
 #include "UI/ApexUIArt.h"
 #include "Core/ApexMapRegistry.h"
+#include "Core/ApexKeyBindings.h"
 #include "HAL/PlatformTime.h"
 #include "Widgets/SLeafWidget.h"
 
@@ -34,11 +35,13 @@ public:
 			TEXT("湿地只是好看，抓地和干地一样，放心踩油门。"),
 			TEXT("轮胎尖叫声变细，说明角度在收，再补一点油门。"),
 			TEXT("反打方向要快，松方向要慢，车尾才不会甩回来。"),
-			TEXT("按 C 换到引擎盖视角，更容易看清车头和弯心的距离。"),
+			TEXT("按%s换到引擎盖视角，更容易看清车头和弯心的距离。"),
 			TEXT("轻轻擦一下外墙也能加分，撞上去就全没了。"),
 		};
 		const int32 N = UE_ARRAY_COUNT(Tips);
 		Tip = Tips[FMath::RandRange(0, N - 1)];
+		// 带按键名的那条按当前键位填
+		Tip = Tip.Replace(TEXT("%s"), *FString::Printf(TEXT(" %s "), *ApexKeys::Name(EApexBind::Camera)));
 		T0 = FPlatformTime::Seconds();
 		SetCanTick(false);
 		ForceVolatile(true);

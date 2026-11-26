@@ -3,6 +3,7 @@
 #include "Core/ApexDriftPlayerController.h"
 #include "Core/ApexDriftSaveGame.h"
 #include "Core/ApexGraphicsSettingsManager.h"
+#include "Core/ApexKeyBindings.h"
 #include "Vehicle/ApexDriftVehiclePawn.h"
 #include "Audio/ApexVehicleAudioComponent.h"
 
@@ -12,6 +13,7 @@ using FGfx = FApexGraphicsSettingsManager;
 namespace
 {
 	constexpr float ControlW = 392.0f;
+	constexpr float KeyCapW = 150.0f;
 	constexpr int32 KeysTab = 3;
 }
 
@@ -138,9 +140,9 @@ void SApexSettings::Construct(const FArguments& InArgs)
 
 		FRow& Tr = Pg.Rows.AddDefaulted_GetRef();
 		Tr.Name = TEXT("变速箱");
-		Tr.Desc = TEXT("手动模式用 E / Q（RB / LB）升降挡");
+		Tr.DynDesc = [] { return FString::Printf(TEXT("手动模式用 %s / %s（RB / LB）升降挡"), *ApexKeys::Name(EApexBind::ShiftUp), *ApexKeys::Name(EApexBind::ShiftDown)); };
 		Tr.Options = { TEXT("自动"), TEXT("手动") };
-		Tr.OptionDescs = { TEXT("专注方向和油门"), TEXT("自己用 E / Q 换挡，顶到红线不升挡车速就上不去") };
+		Tr.OptionDescs = { TEXT("专注方向和油门"), TEXT("自己用升挡 / 降挡键换挡（可在“按键”页改），顶到红线不升挡车速就上不去") };
 		Tr.Get = [](const UApexDriftSaveGame& S) { return S.bManualTransmission ? 1 : 0; };
 		Tr.Set = [](UApexDriftSaveGame& S, int32 V) { S.bManualTransmission = V != 0; };
 
@@ -184,6 +186,15 @@ void SApexSettings::Construct(const FArguments& InArgs)
 		Pg.Name = TEXT("按键");
 		Pg.En = TEXT("CONTROLS");
 		Pg.Icon = EApexIcon::Keyboard;
+		for (int32 b = 0; b < ApexKeys::Num; ++b)
+		{
+			const ApexKeys::FInfo& I = ApexKeys::Info(static_cast<EApexBind>(b));
+			FRow& K = Pg.Rows.AddDefaulted_GetRef();
+			K.Type = EType::Key;
+			K.Bind = b;
+			K.Name = I.Label;
+			K.Desc = I.Desc;
+		}
 	}
 }
 
@@ -200,10 +211,25 @@ SApexSettings::FLayout SApexSettings::Layout(const FVector2f& S) const
 	L.ListW = 900.0f;
 	L.DetailX = L.ListX + L.ListW + 48.0f;
 	L.DetailW = FMath::Max(260.0f, S.X - L.X0 - L.DetailX);
+	if (Tab == KeysTab)
+	{
+		L.PerCol = (Pages[Tab].Rows.Num() + 1) / 2;
+		L.RowH = FMath::Min(84.0f, (S.Y - 150.0f - L.Y0) / FMath::Max(1, L.PerCol));
+	}
 	return L;
 }
 
-FApexRect SApexSettings::RowRect(const FLayout& L, int32 i) const { return FApexRect(L.ListX, L.Y0 + i * L.RowH, L.ListW, L.RowH - 8.0f); }
+FApexRect SApexSettings::RowRect(const FLayout& L, int32 i) const
+{
+	if (L.PerCol > 0)
+	{
+		const float W = (L.ListW - 16.0f) * 0.5f;
+		return FApexRect(L.ListX + (i / L.PerCol) * (W + 16.0f), L.Y0 + (i % L.PerCol) * L.RowH, W, L.RowH - 8.0f);
+	}
+	return FApexRect(L.ListX, L.Y0 + i * L.RowH, L.ListW, L.RowH - 8.0f);
+}
+FApexRect SApexSettings::KeyCapRect(const FApexRect& Row) const { return FApexRect(Row.R() - 20.0f - KeyCapW, Row.CY() - 23.0f, KeyCapW, 46.0f); }
+float SApexSettings::ControlWidth(const FRow& R) const { return R.Type == EType::Key ? KeyCapW + 20.0f : ControlW; }
 FApexRect SApexSettings::SliderRect(const FApexRect& Row) const { return FApexRect(Row.R() - ControlW + 4.0f, Row.CY() - 20.0f, ControlW - 100.0f, 40.0f); }
 FApexRect SApexSettings::ArrowRect(const FApexRect& Row, bool bRight) const
 {
@@ -232,10 +258,13 @@ void SApexSettings::OnShown()
 	TabT = 0.0f;
 	LastRow = 0;
 	PendingCommit = -1.0f;
+	CaptureRow = -1;
+	NoticeT = 0.0f;
 }
 
 void SApexSettings::OnHidden()
 {
+	CaptureRow = -1;
 	if (PendingCommit >= 0.0f)
 	{
 		Commit(false);
@@ -263,11 +292,16 @@ void SApexSettings::BuildItems(const FVector2f& S)
 	{
 		LastRow = FocusId - IdRow0;
 	}
+	if (CaptureRow >= 0)
+	{
+		LastRow = CaptureRow;
+	}
 }
 
 void SApexSettings::TickScreen(float Dt)
 {
 	TabT = FMath::Min(1.0f, TabT + Dt * 4.0f);
+	NoticeT = FMath::Max(0.0f, NoticeT - Dt);
 	if (PendingCommit >= 0.0f)
 	{
 		PendingCommit -= Dt;
@@ -283,6 +317,8 @@ void SApexSettings::SetTab(int32 T)
 	T = FMath::Clamp(T, 0, Pages.Num() - 1);
 	if (T != Tab)
 	{
+		CaptureRow = -1;
+		NoticeT = 0.0f;
 		Tab = T;
 		TabT = 0.0f;
 		LastRow = 0;
@@ -359,9 +395,9 @@ void SApexSettings::SetSlider(const FRow& R, float V)
 bool SApexSettings::OnAdjust(int32 Id, int32 Dir)
 {
 	const FRow* R = RowOf(Id);
-	if (!R)
+	if (!R || R->Type == EType::Key)
 	{
-		return false;
+		return false;   // 按键页左右键在两列之间移动
 	}
 	if (R->Type == EType::Slider)
 	{
@@ -416,8 +452,19 @@ void SApexSettings::OnActivate(int32 Id, const FVector2f& LocalPos, bool bMouse)
 		RestoreDefaults();
 		return;
 	}
+	if (CaptureRow >= 0)
+	{
+		// 等待按键时点了别处：只取消
+		StopCapture(TEXT("已取消改键"));
+		return;
+	}
 	if (const FRow* R = RowOf(Id))
 	{
+		if (R->Type == EType::Key)
+		{
+			StartCapture(Id - IdRow0);
+			return;
+		}
 		if (R->Type == EType::Choice)
 		{
 			const FApexRect Row = RectOf(Id);
@@ -433,6 +480,11 @@ void SApexSettings::OnActivate(int32 Id, const FVector2f& LocalPos, bool bMouse)
 
 bool SApexSettings::OnBack()
 {
+	if (CaptureRow >= 0)
+	{
+		StopCapture(TEXT("已取消改键"));
+		return true;
+	}
 	if (PendingCommit >= 0.0f)
 	{
 		Commit(false);
@@ -448,6 +500,16 @@ void SApexSettings::RestoreDefaults()
 {
 	if (!Save.IsValid())
 	{
+		return;
+	}
+	if (Tab == KeysTab)
+	{
+		CaptureRow = -1;
+		ApexKeys::ResetAll(Save.Get());
+		if (PC.IsValid()) PC->ApplyKeyBindings();
+		Notice = TEXT("已恢复默认键位");
+		NoticeT = 2.5f;
+		Click();
 		return;
 	}
 	const UApexDriftSaveGame* Def = GetDefault<UApexDriftSaveGame>();
@@ -494,7 +556,7 @@ void SApexSettings::PaintRow(FApexPainter& P, const FLayout& L, int32 i) const
 	const float TX = B.X + 34.0f;
 	const float A = bOff ? 0.42f : 1.0f;
 	P.Text(R.Name, TX, B.Y + 27.0f, EApexFont::Display, 28.0f, Paper(A));
-	P.TextFit(bOff ? Why : R.Desc, TX - 5.0f, B.Y + 56.0f, EApexFont::Body, 16.0f, B.W - ControlW - 60.0f, bOff ? Fade(Gold(), 0.8f) : TextLow());
+	P.TextFit(bOff ? Why : RowDesc(R), TX - 5.0f, B.Y + 56.0f, EApexFont::Body, 16.0f, B.W - ControlWidth(R) - 60.0f, bOff ? Fade(Gold(), 0.8f) : TextLow());
 
 	if (!Save.IsValid())
 	{
@@ -502,7 +564,18 @@ void SApexSettings::PaintRow(FApexPainter& P, const FLayout& L, int32 i) const
 		return;
 	}
 
-	if (R.Type == EType::Choice)
+	if (R.Type == EType::Key)
+	{
+		const EApexBind Bd = static_cast<EApexBind>(R.Bind);
+		const bool bCap = CaptureRow == i;
+		const bool bChanged = ApexKeys::Get(Bd) != ApexKeys::GetDefault(Bd);
+		const FApexRect KR = KeyCapRect(B);
+		const float Pulse = 0.5f + 0.5f * FMath::Sin(TimeNow * 6.0f);
+		P.RoundRect(FApexRect(KR.X, KR.Y + 4.0f, KR.W, KR.H), 8.0f, InkDeep(0.65f));
+		P.RoundRect(KR, 8.0f, bCap ? WithA(Accent, 0.55f + 0.45f * Pulse) : (bChanged ? Mix(Paper(0.95f), Accent, 0.45f) : Paper(0.95f)));
+		P.TextFit(bCap ? FString(TEXT("按新键…")) : ApexKeys::Name(Bd), KR.CX(), KR.CY(), EApexFont::BodyBold, 22.0f, KR.W - 16.0f, Ink(), EApexH::Center);
+	}
+	else if (R.Type == EType::Choice)
 	{
 		const FApexRect AL = ArrowRect(B, false), AR = ArrowRect(B, true);
 		const int32 Cur = R.Get(*Save);
@@ -562,14 +635,15 @@ void SApexSettings::PaintDetail(FApexPainter& P, const FLayout& L, const FVector
 	const float X = L.DetailX;
 	const float W = L.DetailW;
 	float Y = L.Y0;
-	P.Rect(FApexRect(X, Y, 1.0f, Pg.Rows.Num() * L.RowH > 420.0f ? Pg.Rows.Num() * L.RowH - 8.0f : 420.0f), Line(0.16f));
+	const int32 NR = L.PerCol > 0 ? L.PerCol : Pg.Rows.Num();
+	P.Rect(FApexRect(X, Y, 1.0f, NR * L.RowH > 420.0f ? NR * L.RowH - 8.0f : 420.0f), Line(0.16f));
 	const float TX = X + 32.0f;
 	const float TW = W - 40.0f;
 	Y += 24.0f;
 	P.Text(R.Name, TX, Y, EApexFont::Display, 36.0f, TextHi());
 	P.SkewH(FApexRect(TX + 2.0f, Y + 30.0f, 92.0f, 4.0f), Accent, WithA(Accent, 0.0f), 0.5f);
 	Y += 70.0f;
-	const FString Body = R.Detail.IsEmpty() ? R.Desc : R.Detail;
+	const FString Body = R.Detail.IsEmpty() ? RowDesc(R) : R.Detail;
 	const int32 N = P.TextWrap(Body, TX, Y, TW, EApexFont::Body, 19.0f, 32.0f, TextMid(), 4);
 	Y += N * 32.0f + 18.0f;
 
@@ -606,6 +680,27 @@ void SApexSettings::PaintDetail(FApexPainter& P, const FLayout& L, const FVector
 		P.Text(R.Fmt(R.GetF(*Save)), TX - 2.0f, Y + 34.0f, EApexFont::NumHeavy, 84.0f, TextHi());
 		P.Text(FString::Printf(TEXT("默认 %s"), *R.Fmt(R.GetF(*GetDefault<UApexDriftSaveGame>()))), TX, Y + 96.0f, EApexFont::Body, 17.0f, TextLow());
 	}
+	else if (R.Type == EType::Key)
+	{
+		const EApexBind Bd = static_cast<EApexBind>(R.Bind);
+		const bool bCap = CaptureRow == LastRow;
+		const float Pulse = 0.5f + 0.5f * FMath::Sin(TimeNow * 6.0f);
+		const FApexRect Cap(TX, Y, FMath::Min(TW, 320.0f), 76.0f);
+		P.RoundRect(FApexRect(Cap.X, Cap.Y + 5.0f, Cap.W, Cap.H), 10.0f, InkDeep(0.65f));
+		P.RoundRect(Cap, 10.0f, bCap ? WithA(Accent, 0.55f + 0.45f * Pulse) : Paper(0.95f));
+		P.TextFit(bCap ? FString(TEXT("请按下新按键")) : ApexKeys::Name(Bd), Cap.CX(), Cap.CY(), EApexFont::BodyBold, 32.0f, Cap.W - 24.0f, Ink(), EApexH::Center);
+		Y += Cap.H + 34.0f;
+		P.Text(FString::Printf(TEXT("默认 %s"), *ApexKeys::KeyName(ApexKeys::GetDefault(Bd))), TX, Y, EApexFont::Body, 17.0f, TextLow());
+		Y += 32.0f;
+		Y += P.TextWrap(FString::Printf(TEXT("固定：%s"), ApexKeys::Info(Bd).Fixed), TX, Y, TW, EApexFont::Body, 17.0f, 28.0f, TextLow(), 2) * 28.0f + 14.0f;
+		Y += P.TextWrap(bCap ? FString(TEXT("按 Esc（手柄 B）取消。Esc、P、回车、Tab 和方向键有固定用途，不能用。"))
+			: FString(TEXT("点这一行或按回车，再按想用的键。和别的动作重复时，两个动作的键会互换。")),
+			TX, Y, TW, EApexFont::Body, 17.0f, 28.0f, TextMid(), 3) * 28.0f + 14.0f;
+	}
+	if (NoticeT > 0.0f && Tab == KeysTab)
+	{
+		P.TextWrap(Notice, TX, Y + 10.0f, TW, EApexFont::BodyBold, 19.0f, 30.0f, WithA(Accent, FMath::Min(1.0f, NoticeT * 2.0f)), 3);
+	}
 }
 
 void SApexSettings::PaintScreen(FApexPainter& P, const FVector2f& S) const
@@ -631,29 +726,11 @@ void SApexSettings::PaintScreen(FApexPainter& P, const FVector2f& S) const
 		if (IsFocused(IdTab0 + i)) FocusRing(P, R, Slant, 5.0f);
 	}
 
-	if (Tab == KeysTab)
+	for (int32 i = 0; i < Pages[Tab].Rows.Num(); ++i)
 	{
-		const float GW = S.X - L.X0 - L.ListX;
-		const float Scale = FMath::Min(GW / GuideW, (S.Y - L.Y0 - 100.0f) / GuideH);
-		P.Flush();
-		const int32 Lyr = P.GetLayer() + 1;
-		const FGeometry Child = P.GetGeometry().MakeChild(FVector2f(GuideW, GuideH), FSlateLayoutTransform(Scale, FVector2f(L.ListX + 8.0f, L.Y0 + 4.0f)));
-		int32 OutL = Lyr;
-		{
-			FApexPainter C(Child, P.GetOut(), Lyr, P.GetAlpha() * EaseOut(TabT));
-			ControlsGuide(C, 0.0f, 0.0f, Accent, TimeNow);
-			OutL = C.Finish();
-		}
-		P.SetLayer(OutL + 1);
+		PaintRow(P, L, i);
 	}
-	else
-	{
-		for (int32 i = 0; i < Pages[Tab].Rows.Num(); ++i)
-		{
-			PaintRow(P, L, i);
-		}
-		PaintDetail(P, L, S);
-	}
+	PaintDetail(P, L, S);
 
 	const FApexRect RB = RectOf(IdBack);
 	GhostButton(P, RB, TEXT("返回"), EApexIcon::ArrowLeft, HoverOf(IdBack), PressOf(IdBack), 25.0f);
@@ -665,12 +742,90 @@ void SApexSettings::PaintScreen(FApexPainter& P, const FVector2f& S) const
 		if (IsFocused(IdDefaults)) FocusRing(P, RD);
 	}
 
-	const TTuple<FString, FString, FString> Hints[] = {
-		MakeTuple(FString(TEXT("↑|↓")), FString(TEXT("左摇杆")), FString(TEXT("选择")) ),
-		MakeTuple(FString(TEXT("←|→")), FString(TEXT("←|→")), FString(TEXT("调整")) ),
-		MakeTuple(FString(TEXT("Q|E")), FString(TEXT("LB|RB")), FString(TEXT("切换分类")) ),
-		MakeTuple(FString(TEXT("Esc")), FString(TEXT("B")), FString(TEXT("返回")) ),
-	};
-	HintBar(P, L.X0 + 4.0f, S.Y - 42.0f, MakeArrayView(Hints));
+	if (CaptureRow >= 0)
+	{
+		const TTuple<FString, FString, FString> Hints[] = {
+			MakeTuple(FString(TEXT("任意键")), FString(TEXT("—")), FString(TEXT("绑定到这个动作")) ),
+			MakeTuple(FString(TEXT("Esc")), FString(TEXT("B")), FString(TEXT("取消")) ),
+		};
+		HintBar(P, L.X0 + 4.0f, S.Y - 42.0f, MakeArrayView(Hints));
+	}
+	else
+	{
+		const bool bKeys = Tab == KeysTab;
+		const TTuple<FString, FString, FString> Hints[] = {
+			MakeTuple(FString(bKeys ? TEXT("↑|↓|←|→") : TEXT("↑|↓")), FString(TEXT("左摇杆")), FString(TEXT("选择")) ),
+			bKeys ? MakeTuple(FString(TEXT("Enter")), FString(TEXT("A")), FString(TEXT("改键")) )
+				: MakeTuple(FString(TEXT("←|→")), FString(TEXT("←|→")), FString(TEXT("调整")) ),
+			MakeTuple(FString(TEXT("Q|E")), FString(TEXT("LB|RB")), FString(TEXT("切换分类")) ),
+			MakeTuple(FString(TEXT("Esc")), FString(TEXT("B")), FString(TEXT("返回")) ),
+		};
+		HintBar(P, L.X0 + 4.0f, S.Y - 42.0f, MakeArrayView(Hints));
+	}
 	P.SetAlpha(Base);
+}
+
+void SApexSettings::StartCapture(int32 Row)
+{
+	CaptureRow = Row;
+	LastRow = Row;
+	NoticeT = 0.0f;
+	Click();
+}
+
+void SApexSettings::StopCapture(const FString& Msg)
+{
+	CaptureRow = -1;
+	Notice = Msg;
+	NoticeT = Msg.IsEmpty() ? 0.0f : 2.5f;
+}
+
+bool SApexSettings::OnCaptureKey(const FKey& Key, bool bRepeat)
+{
+	if (CaptureRow < 0)
+	{
+		// 刚绑定的键还按着：吞掉它的重复，免得拿来在菜单里导航
+		if (bRepeat && Key == SwallowKey) return true;
+		SwallowKey = FKey();
+		return false;
+	}
+	if (bRepeat) return true;
+	if (Key == EKeys::Escape || Key == EKeys::Gamepad_FaceButton_Right || Key == EKeys::Gamepad_Special_Right)
+	{
+		StopCapture(TEXT("已取消改键"));
+		return true;
+	}
+	const FRow* R = Pages.IsValidIndex(Tab) && Pages[Tab].Rows.IsValidIndex(CaptureRow) ? &Pages[Tab].Rows[CaptureRow] : nullptr;
+	if (!R || R->Type != EType::Key)
+	{
+		CaptureRow = -1;
+		return true;
+	}
+	FString Why;
+	if (!ApexKeys::CanBind(Key, &Why))
+	{
+		Notice = Why;   // 继续等
+		NoticeT = 2.5f;
+		return true;
+	}
+	const EApexBind B = static_cast<EApexBind>(R->Bind);
+	const ApexKeys::FInfo& I = ApexKeys::Info(B);
+	SwallowKey = Key;
+	if (ApexKeys::Get(B) == Key)
+	{
+		StopCapture(FString::Printf(TEXT("“%s”保持 %s"), I.Label, *ApexKeys::KeyName(Key)));
+		return true;
+	}
+	const EApexBind Other = ApexKeys::Set(Save.Get(), B, Key);
+	if (Other != EApexBind::Count)
+	{
+		StopCapture(FString::Printf(TEXT("“%s”改成 %s；“%s”换成 %s"), I.Label, *ApexKeys::KeyName(Key), ApexKeys::Info(Other).Label, *ApexKeys::Name(Other)));
+	}
+	else
+	{
+		StopCapture(FString::Printf(TEXT("“%s”改成 %s"), I.Label, *ApexKeys::KeyName(Key)));
+	}
+	if (PC.IsValid()) PC->ApplyKeyBindings();
+	Click();
+	return true;
 }

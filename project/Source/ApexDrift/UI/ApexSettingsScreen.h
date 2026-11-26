@@ -24,15 +24,18 @@ protected:
 	virtual bool OnBack() override;
 	virtual bool OnMenuKey() override { return OnBack(); }
 	virtual bool OnShoulder(int32 Dir) override;
+	virtual bool OnCaptureKey(const FKey& Key, bool bRepeat) override;
 	virtual int32 DefaultFocus() const override;
 
 private:
-	enum class EType : uint8 { Choice, Slider };
+	enum class EType : uint8 { Choice, Slider, Key };
 	struct FRow
 	{
 		EType Type = EType::Choice;
 		FString Name;
 		FString Desc;                       // 行内一句话
+		TFunction<FString()> DynDesc;       // 有则代替 Desc（文字里带按键名时用）
+		int32 Bind = -1;                    // EType::Key：EApexBind
 		FString Detail;                     // 右侧长说明
 		TArray<FString> Options;
 		TArray<FString> OptionDescs;
@@ -55,12 +58,18 @@ private:
 	struct FLayout
 	{
 		float X0 = 0, ListX = 0, ListW = 900, DetailX = 0, DetailW = 468, Y0 = 176, RowH = 84;
+		int32 PerCol = 0;                   // >0 时设置行分两列（按键页）
 	};
 
 	FLayout Layout(const FVector2f& S) const;
 	FApexRect RowRect(const FLayout& L, int32 i) const;
 	FApexRect SliderRect(const FApexRect& Row) const;
 	FApexRect ArrowRect(const FApexRect& Row, bool bRight) const;
+	FApexRect KeyCapRect(const FApexRect& Row) const;
+	float ControlWidth(const FRow& R) const;
+	static FString RowDesc(const FRow& R) { return R.DynDesc ? R.DynDesc() : R.Desc; }
+	void StartCapture(int32 Row);
+	void StopCapture(const FString& Msg);
 	FString WhyDisabled(const FRow& R) const;
 	const FRow* RowOf(int32 Id) const;
 	void StepChoice(const FRow& R, int32 Dir);
@@ -78,4 +87,8 @@ private:
 	float TabT = 1.0f;
 	int32 LastRow = 0;
 	float PendingCommit = -1.0f;
+	int32 CaptureRow = -1;              // 正在等新按键的行
+	FKey SwallowKey;                    // 刚绑定的键，吞掉它的按住重复，免得拿来导航
+	FString Notice;                     // 改键结果提示
+	float NoticeT = 0.0f;
 };

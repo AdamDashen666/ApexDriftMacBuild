@@ -247,6 +247,10 @@ FReply SApexScreen::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKe
 {
 	const FKey Key = InKeyEvent.GetKey();
 	const bool bPad = Key.IsGamepadKey();
+	if (OnCaptureKey(Key, InKeyEvent.IsRepeat()))
+	{
+		return FReply::Handled();
+	}
 	int32 DX = 0, DY = 0;
 	if (Key == EKeys::Left || Key == EKeys::A || Key == EKeys::Gamepad_DPad_Left) DX = -1;
 	else if (Key == EKeys::Right || Key == EKeys::D || Key == EKeys::Gamepad_DPad_Right) DX = 1;

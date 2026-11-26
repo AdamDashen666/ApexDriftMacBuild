@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
+#include "InputCoreTypes.h"
 #include "Core/ApexDriftTypes.h"
 #include "ApexDriftSaveGame.generated.h"
 
@@ -94,6 +95,10 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Settings")
 	float BaseCameraFOV = 82.0f;
+
+	/** 键盘改键：动作名（ApexKeys::FInfo::Id）→ 键；只存改过的 */
+	UPROPERTY()
+	TMap<FName, FKey> KeyBinds;
 
 	int32 GetWeatherForMap(FName MapId) const
 	{

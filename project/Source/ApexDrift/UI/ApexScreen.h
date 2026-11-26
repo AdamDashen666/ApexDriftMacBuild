@@ -77,6 +77,8 @@ protected:
 	/** 拖拽（滑条）。返回 true 表示该元素支持拖拽 */
 	virtual bool OnDrag(int32 Id, const FVector2f& Pos, bool bEnd) { return false; }
 	virtual bool OnBack() { return false; }
+	/** 改键等待按键时，在导航之前拿到原始按键；返回 true 表示已处理 */
+	virtual bool OnCaptureKey(const FKey& Key, bool bRepeat) { return false; }
 	/** Esc/P/Start 以外的菜单键；Start 默认等同 OnMenuKey */
 	virtual bool OnMenuKey() { return false; }
 	virtual bool OnShoulder(int32 Dir) { return false; }

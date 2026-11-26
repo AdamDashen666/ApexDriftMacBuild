@@ -3,6 +3,7 @@
 #include "UI/ApexUIArt.h"
 #include "Core/ApexDriftPlayerController.h"
 #include "Core/ApexDriftSaveGame.h"
+#include "Core/ApexKeyBindings.h"
 #include "Core/ApexMapRegistry.h"
 #include "Track/ApexTrackSplineActor.h"
 #include "HAL/IConsoleManager.h"
@@ -109,6 +110,10 @@ public:
 	void SetData(AApexDriftPlayerController* InPC, const FApexDriftTelemetry& InTelemetry, EApexGameModeType InMode, EApexGameState InState, float InCountdownSec, const TArray<FVector2D>& InMinimapPts)
 	{
 		PC = InPC;
+		if (KeysVer != ApexKeys::Version())
+		{
+			RefreshKeyTexts();
+		}
 		// 状态迁移
 		if (InState != State)
 		{
@@ -901,20 +906,35 @@ private:
 		TCall.Init(EApexFont::Display, 42.0f);
 		TCallSub.Init(EApexFont::Num, 20.0f);
 		TWrong.Init(EApexFont::Display, 36.0f); TWrong.SetStr(TEXT("方向错误"));
-		TWrongSub.Init(EApexFont::Body, 18.0f); TWrongSub.SetStr(TEXT("请掉头，或按 R 复位到赛道"));
+		TWrongSub.Init(EApexFont::Body, 18.0f);
 		TFps.Init(EApexFont::Num, 30.0f);
 		TFpsCap.Init(EApexFont::Num, 18.0f); TFpsCap.SetStr(TEXT("FPS"));
 		TReady.Init(EApexFont::Display, 92.0f); TReady.SetStr(TEXT("准备"));
 		TCount.Init(EApexFont::NumHeavy, 220.0f);
 		TGo.Init(EApexFont::NumHeavy, 220.0f); TGo.SetStr(TEXT("GO!"));
-		static const TCHAR* Keys[NumHints] = { TEXT("W"), TEXT("A D"), TEXT("空格"), TEXT("S"), TEXT("C"), TEXT("R"), TEXT("F"), TEXT("Esc") };
 		static const TCHAR* Labs[NumHints] = { TEXT("油门"), TEXT("转向"), TEXT("手刹起漂"), TEXT("刹车"), TEXT("视角"), TEXT("复位"), TEXT("自动漂移"), TEXT("暂停") };
 		for (int32 i = 0; i < NumHints; ++i)
 		{
-			THintKey[i].Init(EApexFont::BodyBold, 17.0f); THintKey[i].SetStr(Keys[i]);
+			THintKey[i].Init(EApexFont::BodyBold, 17.0f);
 			THintLab[i].Init(EApexFont::Body, 18.0f); THintLab[i].SetStr(Labs[i]);
 		}
 	}
+
+	/** 提示里的按键名跟着改键走 */
+	void RefreshKeyTexts()
+	{
+		KeysVer = ApexKeys::Version();
+		using ApexKeys::Name;
+		const FString Keys[NumHints] = {
+			Name(EApexBind::Throttle), Name(EApexBind::SteerLeft) + TEXT(" ") + Name(EApexBind::SteerRight), Name(EApexBind::Handbrake),
+			Name(EApexBind::Brake), Name(EApexBind::Camera), Name(EApexBind::Reset), Name(EApexBind::AutoRun), TEXT("Esc") };
+		for (int32 i = 0; i < NumHints; ++i)
+		{
+			THintKey[i].SetStr(Keys[i]);
+		}
+		TWrongSub.SetStr(FString::Printf(TEXT("请掉头，或按 %s 复位到赛道"), *Name(EApexBind::Reset)));
+	}
+	uint32 KeysVer = 0;
 
 	TWeakObjectPtr<AApexDriftPlayerController> PC;
 	FApexDriftTelemetry Tel;
