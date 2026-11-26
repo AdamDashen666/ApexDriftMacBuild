@@ -109,7 +109,12 @@ jobs:
           rm -rf "$RUNNER_TEMP/cooked"
           ls "$PROJ/Saved/Cooked/Mac/ApexDrift/Content/Maps" | grep umap; du -sh "$PROJ/Saved/Cooked/Mac"
 
+      # 恢复缓存失败不该让整次构建失败（2026-11 第 7 次构建解压缓存时构建机卡住 9 分钟后这一步失败）：
+      # 失败就删掉可能只解了一半的目录，从头完整编译（约 2–3 小时，仍在 6 小时内）
       - name: Restore build cache
+        id: restore_build
+        continue-on-error: true
+        timeout-minutes: 20
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -120,6 +125,9 @@ jobs:
 
       # 打包工具 UnrealPak 是引擎程序，编译产物在引擎目录里，单独缓存（和上面的缓存分开，互不影响）
       - name: Restore engine tools cache
+        id: restore_tools
+        continue-on-error: true
+        timeout-minutes: 10
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -127,6 +135,14 @@ jobs:
             UnrealEngine/Engine/Binaries/Mac
           key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
           restore-keys: ue-mac-tools-${{ env.UE_REF }}-
+
+      - name: Discard half-restored cache
+        if: steps.restore_build.outcome != 'success' || steps.restore_tools.outcome != 'success'
+        run: |
+          echo "::warning::恢复编译缓存失败，删掉可能不完整的目录，这次从头完整编译"
+          if [ "${{ steps.restore_build.outcome }}" != success ]; then rm -rf project/Intermediate/Build project/Binaries; fi
+          if [ "${{ steps.restore_tools.outcome }}" != success ]; then rm -rf UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac; fi
+          df -h /System/Volumes/Data | tail -1
 
       # 完整输出只写进日志文件（会传到私有仓库），公开日志里只打印结果行，不打印引擎源码片段
       - name: Build, stage, package
