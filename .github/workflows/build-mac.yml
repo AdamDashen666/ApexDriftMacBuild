@@ -54,8 +54,12 @@ jobs:
             printf '%s\n' '#!/bin/bash' "REAL=$REAL" \
               'for a in "$@"; do case "$a" in -d|--decompress|-dc|-cd) exec "$REAL" "$@";; esac; done' \
               'args=(); for a in "$@"; do case "$a" in --long*|-T*) ;; *) args+=("$a");; esac; done' \
-              'exec "$REAL" -T2 "${args[@]}"' > "$W/zstd"
+              'exec taskpolicy -b "$REAL" -T2 "${args[@]}"' > "$W/zstd"
             cp "$W/zstd" "$W/zstdmt"; chmod +x "$W/zstd" "$W/zstdmt"
+            # 存 / 取缓存时 tar 读写几 GB 小文件，构建机会卡死（第 5、10 次存缓存、第 7 次解压时心跳全停）：
+            # tar 和 zstd 都用 taskpolicy -b（后台优先级，磁盘读写限流）跑，把磁盘让给系统和 runner 的连接
+            GT=$(command -v gtar || true)
+            if [ -n "$GT" ]; then printf '%s\n' '#!/bin/bash' "exec taskpolicy -b $GT \"\$@\"" > "$W/gtar"; chmod +x "$W/gtar"; fi
             echo "$W" >> "$GITHUB_PATH"
             echo "zstd 包装：$REAL"
           fi
@@ -176,6 +180,18 @@ jobs:
           grep -o -E "[A-Za-z0-9_./-]+\.(cpp|h|mm|cs):[0-9]+(:[0-9]+)?: (fatal )?error" "$OUT/logs/uat.log" | sort -u | head -20
           exit $CODE
 
+      # 编译一结束就把详细日志传到私有仓库：后面存缓存时构建机如果卡死失联，作业日志会整个丢掉
+      - name: Upload build logs early
+        if: always() && steps.build.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          TAG="mac-build-${{ github.run_number }}"
+          tar -czf "$RUNNER_TEMP/build-logs-${{ github.run_number }}.tgz" -C "$OUT" logs
+          gh release view "$TAG" -R "$PRIVATE_REPO" >/dev/null 2>&1 || gh release create "$TAG" -R "$PRIVATE_REPO" --prerelease --title "Mac 版 #${{ github.run_number }}" \
+            --notes "UE ${UE_REF} 源码编译，Apple 芯片，临时签名（未经苹果公证）。构建：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh release upload "$TAG" -R "$PRIVATE_REPO" --clobber "$RUNNER_TEMP/build-logs-${{ github.run_number }}.tgz"
+
       # 存缓存前先腾内存：UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB
       - name: Free memory before saving cache
         if: always() && steps.build.outcome != 'skipped'
@@ -190,6 +206,8 @@ jobs:
 
       - name: Save build cache
         if: always() && steps.build.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 20
         uses: actions/cache/save@v4
         with:
           path: |
@@ -243,7 +261,7 @@ jobs:
         run: |
           TAG="mac-build-${{ github.run_number }}"
           tar -czf "$RUNNER_TEMP/logs-${{ github.run_number }}.tgz" -C "$OUT" logs
-          gh release create "$TAG" -R "$PRIVATE_REPO" --prerelease --title "Mac 版 #${{ github.run_number }}" \
-            --notes "UE ${UE_REF} 源码编译，Apple 芯片，临时签名（未经苹果公证）。构建：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "$RUNNER_TEMP/logs-${{ github.run_number }}.tgz" $(ls "$OUT"/ApexDrift-mac.dmg 2>/dev/null)
-          echo "已发到私有仓库 release $TAG"
+          gh release view "$TAG" -R "$PRIVATE_REPO" >/dev/null 2>&1 || gh release create "$TAG" -R "$PRIVATE_REPO" --prerelease --title "Mac 版 #${{ github.run_number }}" \
+            --notes "UE ${UE_REF} 源码编译，Apple 芯片，临时签名（未经苹果公证）。构建：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh release upload "$TAG" -R "$PRIVATE_REPO" --clobber "$RUNNER_TEMP/logs-${{ github.run_number }}.tgz" $(ls "$OUT"/ApexDrift-mac.dmg 2>/dev/null)
+          echo "已发到私有仓库 release ${TAG}"
