@@ -1,0 +1,17 @@
+out/
+*.dmg
+.DS_Store
+# 引擎源码、编译产物、烘焙内容绝不提交（本仓库公开）
+UnrealEngine/
+project/Saved/
+project/Intermediate/
+project/Binaries/
+project/Build/
+project/Content/
+project/DerivedDataCache/
+*.pak
+*.utoc
+*.ucas
+*.p12
+*.pem
+.env

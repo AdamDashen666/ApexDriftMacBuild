@@ -1,0 +1,15 @@
+APEX DRIFT（Mac 版）
+
+需要 Apple 芯片的 Mac（M1 及以后）。
+
+安装：把 “APEX DRIFT” 拖进 “应用程序” 文件夹。
+
+第一次打开：这个 App 只做了本地临时签名，没有经过苹果公证，macOS 会拦一下。
+- macOS 15 及以后：先双击打开一次，看到提示后点 “完成”；
+  再到 “系统设置 → 隐私与安全性”，在下面找到 “APEX DRIFT 已被阻止”，点 “仍要打开”，输入密码确认。
+- macOS 14 及以前：在 “应用程序” 里右键点 APEX DRIFT → “打开” → 再点 “打开”。
+- 以上都不行时，打开 “终端”，运行：
+    xattr -dr com.apple.quarantine "/Applications/APEX DRIFT.app"
+之后正常双击即可。
+
+素材署名见同目录的 CREDITS.txt。

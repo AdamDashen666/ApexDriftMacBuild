@@ -1,0 +1,34 @@
+APEX DRIFT 素材署名与许可
+========================
+
+车辆（车名均为游戏内虚构名；除注明外均已修改：拆件、重分材质、去除原有文字与标志、新增灯具/车牌/轮拱等）
+  APEX GT   “Sportscar” by Yasutoshi Mori (@MirageYM)，CC BY 2.0
+            https://github.com/mmp/pbrt-v4-scenes/tree/master/sportscar
+  ONYX      “Concept Car 040 - public domain” by Unity Fan (unityfan777)，作者声明 CC0 / Sketchfab 记录 CC BY 4.0
+            https://sketchfab.com/3d-models/9363e93183274ea1bad403ea6fe3ee79
+  EMBER     “Concept Car 039 - public domain” by Unity Fan (unityfan777)，作者声明 CC0 / Sketchfab 记录 CC BY 4.0
+            https://sketchfab.com/3d-models/f17b9d37e0e34f15b4c2e417a98f5ed6
+  VELA      “Car Concept” © 2023 Darmstadt Graphics Group GmbH / Eric Chadwick（Khronos glTF Sample Assets），CC BY 4.0；
+            原型为 Unity Fan 的 “Concept Car 004”（作者声明 CC0）。已去除全部 Khronos / glTF 标志
+            https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept
+  SELVA     “Selva Hypercar concept by Max Hordin 2019” by maxhordin，CC BY 4.0
+            https://sketchfab.com/3d-models/e426a6e57b364b3fa6c29775c72cac05
+  IRONCLAD  “Muscle Car Concept” by ViktorKom，CC BY 4.0
+            https://sketchfab.com/3d-models/aa5dbdc7d492478ababfd4d385b8339f
+  RUSTBELT  “Hot Rod Pickup” by kird3rf，CC BY 4.0
+            https://sketchfab.com/3d-models/7b882dc2d7ed407689f8e851d5f8250f
+  许可全文 https://creativecommons.org/licenses/by/2.0/ 、https://creativecommons.org/licenses/by/4.0/
+
+地形高程
+  AWS Terrain Tiles（Mapzen / Tilezen），https://registry.opendata.aws/terrain-tiles/
+  数据含 SRTM、JAXA、GSI 等公开来源。赛道与场景布局为原创，仅借用真实山体的起伏。
+
+天空与地表、木石等贴图
+  Poly Haven（CC0）https://polyhaven.com
+  ambientCG（CC0）https://ambientcg.com
+
+字体（SIL Open Font License 1.1）
+  Barlow Condensed、Noto Sans SC、Noto Serif SC、Smiley Sans（得意黑）、Inter
+
+除上述车辆外的模型（樱花、枫树、杉松、鸟居、五重塔、民家、护栏、拱门等）、音效、界面与地图均为本项目原创或程序生成。
+车牌、APEX 字样与地名均为虚构，不指代任何真实厂商或赛事。

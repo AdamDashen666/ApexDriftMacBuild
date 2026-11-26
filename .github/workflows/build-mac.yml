@@ -1,0 +1,154 @@
+name: Build Mac
+
+# 手动触发。公开仓库只为用免费的 Mac 构建机；UE 引擎源码只在构建机上临时拉取，不进仓库、不进公开日志。
+# 流程：拉 UE 源码（只下 Mac 依赖）→ 只编 ApexDrift 游戏程序（Shipping、Apple 芯片）→
+# 用 Windows 上烘焙好的内容（私有仓库 release cooked-mac）打包 → 临时签名 → dmg 和详细日志发到私有仓库 release。
+# 编译中间文件存 Actions 缓存，单次 6 小时没编完，下次接着编。
+on:
+  workflow_dispatch:
+    inputs:
+      ue_ref:
+        description: UE 源码标签（与本机烘焙用的引擎一致）
+        default: 5.9.0-preview-2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-mac
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 360
+    env:
+      UE_REF: ${{ inputs.ue_ref || '5.9.0-preview-2' }}
+      PRIVATE_REPO: AdamDashen666/ApexDriftMac
+      UE: ${{ github.workspace }}/UnrealEngine
+      PROJ: ${{ github.workspace }}/project
+      OUT: ${{ github.workspace }}/out
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Free disk, pick Xcode
+        run: |
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; sw_vers
+          KEEP=/Applications/Xcode_26.1.1.app
+          [ -d "$KEEP" ] || KEEP=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$KEEP"
+          for x in /Applications/Xcode*.app; do [ -L "$x" ] || [ "$x" = "$KEEP" ] || sudo rm -rf "$x" & done; wait
+          sudo rm -rf ~/Library/Android /usr/local/share/android-sdk "$RUNNER_TOOL_CACHE"/* ~/.dotnet /usr/local/share/dotnet ~/.ghcup ~/.rustup ~/.cargo 2>/dev/null || true
+          xcodebuild -version; df -h /System/Volumes/Data
+          mkdir -p "$OUT/logs"
+
+      - name: UE source
+        env:
+          TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "::error::没有配置 UE_SOURCE_TOKEN"; exit 1; }
+          AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
+          # 令牌只放在这一条命令的参数里，不写进 .git/config
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --depth 1 --branch "$UE_REF" \
+            https://github.com/EpicGames/UnrealEngine.git "$UE"
+          du -sh "$UE"
+
+      - name: Engine dependencies (Mac only)
+        run: |
+          cd "$UE"
+          EX=""; for p in Win64 Win32 Linux LinuxArm64 Android IOS TVOS VisionOS HoloLens; do EX="$EX --exclude=$p"; done
+          ./Setup.sh --force $EX > "$OUT/logs/setup.log" 2>&1 || { tail -20 "$OUT/logs/setup.log" | grep -v -E '^\s*$'; exit 1; }
+          du -sh "$UE"; df -h /System/Volumes/Data
+          # 统一时间戳：缓存恢复的编译产物比源码新，UBT 才会跳过已编过的部分
+          find "$UE/Engine/Source" "$UE/Engine/Plugins" "$UE/Engine/Shaders" "$PROJ/Source" -type f -exec touch -t 202001010000 {} +
+
+      - name: Cooked content (from private repo)
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cooked"
+          gh release download cooked-mac -R "$PRIVATE_REPO" -D "$RUNNER_TEMP/cooked" -p 'cooked-mac.tgz.part*'
+          cat "$RUNNER_TEMP"/cooked/cooked-mac.tgz.part* | tar -xzf - -C "$PROJ"
+          rm -rf "$RUNNER_TEMP/cooked"
+          ls "$PROJ/Saved/Cooked/Mac/ApexDrift/Content/Maps" | grep umap; du -sh "$PROJ/Saved/Cooked/Mac"
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            project/Intermediate/Build
+            project/Binaries
+          key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
+          restore-keys: ue-mac-${{ env.UE_REF }}-
+
+      # 完整输出只写进日志文件（会传到私有仓库），公开日志里只打印结果行，不打印引擎源码片段
+      - name: Build, stage, package
+        id: build
+        timeout-minutes: 310
+        run: |
+          cd "$UE"
+          T0=$(date +%s)
+          set +e
+          ./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun -project="$PROJ/ApexDrift.uproject" -noP4 -platform=Mac \
+            -clientconfig=Shipping -build -skipcook -stage -pak -iostore -package -archive -archivedirectory="$OUT/archive" \
+            -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
+          CODE=$?
+          echo "UAT 退出码 $CODE，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
+          grep -c -E "\] Compile " "$OUT/logs/uat.log" | sed 's/^/编译步骤数 /' || true
+          grep -E "BUILD (SUCCESSFUL|FAILED)|AutomationTool exiting|Total execution time|Result: " "$OUT/logs/uat.log" | tail -10
+          grep -o -E "[A-Za-z0-9_./-]+\.(cpp|h|mm|cs):[0-9]+(:[0-9]+)?: (fatal )?error" "$OUT/logs/uat.log" | sort -u | head -20
+          exit $CODE
+
+      - name: Save build cache
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            project/Intermediate/Build
+            project/Binaries
+          key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
+
+      - name: Sign and make dmg
+        run: |
+          SRC=$(find "$OUT/archive" -maxdepth 3 -name "*.app" | head -1)
+          [ -n "$SRC" ] || { echo "::error::没找到打包出的 .app"; find "$OUT/archive" -maxdepth 3; exit 1; }
+          STAGE="$RUNNER_TEMP/dmg"; mkdir -p "$STAGE"
+          APP="$STAGE/APEX DRIFT.app"
+          ditto "$SRC" "$APP"
+          xattr -cr "$APP"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+          lipo -archs "$BIN"; du -sh "$APP"
+          cp "$PROJ/CREDITS.txt" "$STAGE/"
+          cp mac/打开方法.txt "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          for i in 1 2 3; do hdiutil create -volname "APEX DRIFT" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$OUT/ApexDrift-mac.dmg" && break; sleep 10; done
+          hdiutil verify "$OUT/ApexDrift-mac.dmg"
+          ls -la "$OUT"/*.dmg
+          echo "MAC_BIN=$BIN" >> "$GITHUB_ENV"
+
+      # 构建机是虚拟 GPU，能不能跑起 Nanite/Lumen 不一定；跑不起来只记录，不算失败
+      - name: Smoke test
+        continue-on-error: true
+        run: |
+          mkdir -p "$OUT/logs/shots"
+          "$MAC_BIN" -ApexMap=TrainingPark -windowed -ResX=1600 -ResY=900 > "$OUT/logs/run.log" 2>&1 &
+          P=$!
+          for t in 30 60 90; do sleep 30; kill -0 $P 2>/dev/null || break; screencapture -x "$OUT/logs/shots/run_$t.png" || true; done
+          kill $P 2>/dev/null || true; sleep 3; kill -9 $P 2>/dev/null || true
+          grep -c -E "Error|Fatal" "$OUT/logs/run.log" | sed 's/^/运行日志错误行数 /' || true
+          cp ~/Library/Logs/ApexDrift/*.log "$OUT/logs/" 2>/dev/null || true
+          find ~/Library/Logs/DiagnosticReports -name "*ApexDrift*" -exec cp {} "$OUT/logs/" \; 2>/dev/null || true
+
+      - name: Upload dmg and logs to private repo
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          TAG="mac-build-${{ github.run_number }}"
+          tar -czf "$RUNNER_TEMP/logs-${{ github.run_number }}.tgz" -C "$OUT" logs
+          gh release create "$TAG" -R "$PRIVATE_REPO" --prerelease --title "Mac 版 #${{ github.run_number }}" \
+            --notes "UE ${UE_REF} 源码编译，Apple 芯片，临时签名（未经苹果公证）。构建：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "$RUNNER_TEMP/logs-${{ github.run_number }}.tgz" $(ls "$OUT"/ApexDrift-mac.dmg 2>/dev/null)
+          echo "已发到私有仓库 release $TAG"
