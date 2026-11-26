@@ -1,9 +1,10 @@
 #include "Core/ApexKeyBindings.h"
 #include "Core/ApexDriftSaveGame.h"
 
+// 名字都带 Keys / Bind：Mac 是 unity build，会和别的文件拼在一起编译，匿名命名空间里的通用名（如 EnsureLoaded）会撞
 namespace
 {
-	const ApexKeys::FInfo& InfoAt(int32 i)
+	const ApexKeys::FInfo& BindInfoAt(int32 i)
 	{
 		static const ApexKeys::FInfo Table[ApexKeys::Num] = {
 			{ TEXT("Throttle"),   TEXT("油门"),     TEXT("油门"), TEXT("加速"),           TEXT("方向键 ↑ · 手柄 RT"),     EKeys::W },
@@ -23,29 +24,29 @@ namespace
 		return Table[FMath::Clamp(i, 0, ApexKeys::Num - 1)];
 	}
 
-	FKey GKeys[ApexKeys::Num];
-	bool GLoaded = false;
-	uint32 GVersion = 1;
+	FKey GBoundKeys[ApexKeys::Num];
+	bool GBoundLoaded = false;
+	uint32 GBindVersion = 1;
 
-	void EnsureLoaded()
+	void EnsureKeysLoaded()
 	{
-		if (!GLoaded)
+		if (!GBoundLoaded)
 		{
-			for (int32 i = 0; i < ApexKeys::Num; ++i) GKeys[i] = InfoAt(i).Default;
-			GLoaded = true;
+			for (int32 i = 0; i < ApexKeys::Num; ++i) GBoundKeys[i] = BindInfoAt(i).Default;
+			GBoundLoaded = true;
 		}
 	}
 
-	void WriteSave(UApexDriftSaveGame* Save)
+	void WriteKeysToSave(UApexDriftSaveGame* Save)
 	{
 		if (!Save) return;
 		Save->KeyBinds.Reset();
 		for (int32 i = 0; i < ApexKeys::Num; ++i)
 		{
 			// 只存改过的，以后调整默认键位时没改过的玩家自动跟上
-			if (GKeys[i] != InfoAt(i).Default)
+			if (GBoundKeys[i] != BindInfoAt(i).Default)
 			{
-				Save->KeyBinds.Add(FName(InfoAt(i).Id), GKeys[i]);
+				Save->KeyBinds.Add(FName(BindInfoAt(i).Id), GBoundKeys[i]);
 			}
 		}
 	}
@@ -53,20 +54,20 @@ namespace
 
 namespace ApexKeys
 {
-	const FInfo& Info(EApexBind B) { return InfoAt(static_cast<int32>(B)); }
+	const FInfo& Info(EApexBind B) { return BindInfoAt(static_cast<int32>(B)); }
 
 	void Load(const UApexDriftSaveGame* Save)
 	{
-		GLoaded = false;
-		EnsureLoaded();
+		GBoundLoaded = false;
+		EnsureKeysLoaded();
 		if (Save)
 		{
 			for (int32 i = 0; i < Num; ++i)
 			{
-				const FKey* K = Save->KeyBinds.Find(FName(InfoAt(i).Id));
+				const FKey* K = Save->KeyBinds.Find(FName(BindInfoAt(i).Id));
 				if (K && CanBind(*K))
 				{
-					GKeys[i] = *K;
+					GBoundKeys[i] = *K;
 				}
 			}
 			// 存档被手改出重复键时整套退回默认，免得两个动作抢一个键
@@ -75,68 +76,68 @@ namespace ApexKeys
 			{
 				for (int32 j = 0; j < i; ++j)
 				{
-					if (GKeys[j] == GKeys[i]) { bDup = true; break; }
+					if (GBoundKeys[j] == GBoundKeys[i]) { bDup = true; break; }
 				}
 			}
 			if (bDup)
 			{
-				for (int32 i = 0; i < Num; ++i) GKeys[i] = InfoAt(i).Default;
+				for (int32 i = 0; i < Num; ++i) GBoundKeys[i] = BindInfoAt(i).Default;
 			}
 		}
-		++GVersion;
+		++GBindVersion;
 	}
 
 	FKey Get(EApexBind B)
 	{
-		EnsureLoaded();
-		return GKeys[FMath::Clamp(static_cast<int32>(B), 0, Num - 1)];
+		EnsureKeysLoaded();
+		return GBoundKeys[FMath::Clamp(static_cast<int32>(B), 0, Num - 1)];
 	}
 
 	FKey GetDefault(EApexBind B) { return Info(B).Default; }
 
 	EApexBind Find(const FKey& K)
 	{
-		EnsureLoaded();
+		EnsureKeysLoaded();
 		for (int32 i = 0; i < Num; ++i)
 		{
-			if (GKeys[i] == K) return static_cast<EApexBind>(i);
+			if (GBoundKeys[i] == K) return static_cast<EApexBind>(i);
 		}
 		return EApexBind::Count;
 	}
 
 	EApexBind Set(UApexDriftSaveGame* Save, EApexBind B, const FKey& K)
 	{
-		EnsureLoaded();
+		EnsureKeysLoaded();
 		const int32 i = static_cast<int32>(B);
-		if (i < 0 || i >= Num || !CanBind(K) || GKeys[i] == K)
+		if (i < 0 || i >= Num || !CanBind(K) || GBoundKeys[i] == K)
 		{
 			return EApexBind::Count;
 		}
 		const EApexBind Other = Find(K);
 		if (Other != EApexBind::Count)
 		{
-			GKeys[static_cast<int32>(Other)] = GKeys[i];
+			GBoundKeys[static_cast<int32>(Other)] = GBoundKeys[i];
 		}
-		GKeys[i] = K;
-		WriteSave(Save);
-		++GVersion;
+		GBoundKeys[i] = K;
+		WriteKeysToSave(Save);
+		++GBindVersion;
 		return Other;
 	}
 
 	void ResetAll(UApexDriftSaveGame* Save)
 	{
-		for (int32 i = 0; i < Num; ++i) GKeys[i] = InfoAt(i).Default;
-		GLoaded = true;
-		WriteSave(Save);
-		++GVersion;
+		for (int32 i = 0; i < Num; ++i) GBoundKeys[i] = BindInfoAt(i).Default;
+		GBoundLoaded = true;
+		WriteKeysToSave(Save);
+		++GBindVersion;
 	}
 
 	bool IsAllDefault()
 	{
-		EnsureLoaded();
+		EnsureKeysLoaded();
 		for (int32 i = 0; i < Num; ++i)
 		{
-			if (GKeys[i] != InfoAt(i).Default) return false;
+			if (GBoundKeys[i] != BindInfoAt(i).Default) return false;
 		}
 		return true;
 	}
@@ -180,5 +181,5 @@ namespace ApexKeys
 
 	FString Name(EApexBind B) { return KeyName(Get(B)); }
 
-	uint32 Version() { return GVersion; }
+	uint32 Version() { return GBindVersion; }
 }
