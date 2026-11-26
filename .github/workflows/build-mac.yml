@@ -167,10 +167,20 @@ jobs:
             done ) &
           PROG=$!
           # -DisableAdaptiveUnity：不用 git status 挑文件（UE 源码太大会超时），每次分组一致，缓存才稳定
-          ./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun -project="$PROJ/ApexDrift.uproject" -noP4 -platform=Mac \
-            -clientconfig=Shipping -build -skipcook -stage -pak -iostore -package -archive -archivedirectory="$OUT/archive" \
-            -ubtargs=-DisableAdaptiveUnity -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
-          CODE=$?
+          run_uat() {
+            ./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun -project="$PROJ/ApexDrift.uproject" -noP4 -platform=Mac \
+              -clientconfig=Shipping -build -skipcook -stage -pak -iostore -package -archive -archivedirectory="$OUT/archive" \
+              -ubtargs=-DisableAdaptiveUnity -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
+          }
+          run_uat; CODE=$?
+          # 编译还没开始就失败，多半是 UAT 自己没发布好（2026-11 第 8 次构建 AutomationTool.deps.json 是空文件、dotnet 崩溃）：
+          # 清掉 AutomationTool 重来一次。编译开始后的失败（代码错误等）不重试
+          if [ $CODE -ne 0 ] && ! grep -a -q -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log"; then
+            echo "::warning::UAT 在编译开始前失败（退出码 ${CODE}），清掉 AutomationTool 重试一次"
+            mv "$OUT/logs/uat.log" "$OUT/logs/uat-try1.log"
+            rm -rf Engine/Binaries/DotNET/AutomationTool
+            run_uat; CODE=$?
+          fi
           kill $PROG 2>/dev/null
           echo "UAT 退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
           grep -c -E "\] Compile " "$OUT/logs/uat.log" | sed 's/^/编译步骤数 /' || true
