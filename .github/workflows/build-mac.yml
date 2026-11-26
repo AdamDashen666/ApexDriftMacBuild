@@ -134,6 +134,11 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
           BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
           lipo -archs "$BIN"; du -sh "$APP"
+          # 检查：App 信息、图标、两套 Metal 着色器（SM6 给 M2+ 且 macOS 15+，SM5 给 M1 或 macOS 14）
+          plutil -p "$APP/Contents/Info.plist" | grep -E "CFBundle(DisplayName|Name|Identifier|ShortVersionString|IconName|IconFile)|NSHighResolutionCapable|LSApplicationCategoryType|LSMinimumSystemVersion" || true
+          ls "$APP/Contents/Resources" | grep -i -E "\.icns$|Assets\.car" || echo "::warning::没找到图标资源"
+          find "$APP" \( -name "*.metallib" -o -name "*.metalmap" \) -exec ls -la {} \; | awk '{print $5, $NF}' | sed "s#.*/Contents/#Contents/#"
+          for sm in sm5 sm6; do find "$APP" -iname "*metal_${sm}*" | grep -q . && echo "着色器 ${sm}：有" || echo "::warning::包里没找到 ${sm} 的着色器库文件（也可能打进了 pak）"; done
           cp "$PROJ/CREDITS.txt" "$STAGE/"
           cp mac/打开方法.txt "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
