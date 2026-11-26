@@ -165,14 +165,18 @@ jobs:
               -ubtargs=-DisableAdaptiveUnity -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
           }
           run_uat; CODE=$?
-          # 编译还没开始就失败，多半是 UAT 自己没发布好（2026-11 第 8 次构建 AutomationTool.deps.json 是空文件、dotnet 崩溃）：
-          # 清掉 AutomationTool 重来一次。编译开始后的失败（代码错误等）不重试
-          if [ $CODE -ne 0 ] && ! grep -a -q -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log"; then
-            echo "::warning::UAT 在编译开始前失败（退出码 ${CODE}），清掉 AutomationTool 重试一次"
-            mv "$OUT/logs/uat.log" "$OUT/logs/uat-try1.log"
+          # 编译还没开始就失败，是 UAT 自己的 .NET 构建出了岔子：3 核机器上并行编 45 个脚本工程时，偶尔两个进程同时写
+          # 共享的 EpicGames.Core / Horde 引用程序集，写坏（“PE image doesn't contain managed metadata”）或 deps.json 为空
+          # （2026-11 第 8、9、11 次）。坏文件留在 uatobj / obj 里，重试前必须清掉，否则 MSBuild 当它是好的接着用。
+          # 最多再试两次；编译开始后的失败（代码错误等）不重试
+          for TRY in 2 3; do
+            [ $CODE -ne 0 ] && ! grep -a -q -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log" || break
+            echo "::warning::UAT 在编译开始前失败（退出码 ${CODE}），清掉 .NET 中间文件后第 ${TRY} 次尝试"
+            mv "$OUT/logs/uat.log" "$OUT/logs/uat-try$((TRY - 1)).log"
             rm -rf Engine/Binaries/DotNET/AutomationTool
+            find Engine/Source/Programs -type d \( -name uatobj -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null
             run_uat; CODE=$?
-          fi
+          done
           kill $PROG 2>/dev/null
           echo "UAT 退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
           grep -c -E "\] Compile " "$OUT/logs/uat.log" | sed 's/^/编译步骤数 /' || true
