@@ -4,9 +4,13 @@
 # 测试期间别碰鼠标和键盘。测试不会改你的存档和成绩，画质只在测试时临时切换。
 # 结果放在桌面 “ApexDrift性能测试-日期” 文件夹里，把整个文件夹压缩后发给开发者。
 # 注意：macOS 自带的 bash 是 3.2，变量后面紧跟中文时一律写成 ${VAR}。
+# 构建机自测用的环境变量（玩家不用管）：APEX_EXTRA_ARGS 追加启动参数，APEX_PERF_RUNS 换测试项，
+# APEX_PERF_OUT 换输出目录，APEX_NO_PROMPT=1 不等回车、不打开访达。
 
 set -u
 cd "$(dirname "$0")" || exit 1
+EXTRA="${APEX_EXTRA_ARGS:-}"
+pause_end() { [ -n "${APEX_NO_PROMPT:-}" ] || read -r -p "按回车关闭 " _; }
 
 APP=""
 for a in "/Applications/APEX DRIFT.app" "$HOME/Applications/APEX DRIFT.app" "$(pwd)/APEX DRIFT.app"; do
@@ -14,7 +18,7 @@ for a in "/Applications/APEX DRIFT.app" "$HOME/Applications/APEX DRIFT.app" "$(p
 done
 if [ -z "$APP" ]; then
   echo "没找到 APEX DRIFT.app。请先把它拖进 “应用程序” 文件夹，再运行这个测试。"
-  read -r -p "按回车关闭 " _
+  pause_end
   exit 1
 fi
 
@@ -24,7 +28,7 @@ if xattr -p com.apple.quarantine "$APP" >/dev/null 2>&1; then
   echo "可以先按《打开方法.txt》正常打开一次游戏，再回来运行测试；"
   read -r -p "或者输入 y 现在解除隔离标记并继续（等同于《打开方法》里的终端命令）： " ANS
   if [ "${ANS}" = "y" ] || [ "${ANS}" = "Y" ]; then
-    xattr -dr com.apple.quarantine "$APP" || { echo "解除失败，请按《打开方法.txt》操作。"; read -r -p "按回车关闭 " _; exit 1; }
+    xattr -dr com.apple.quarantine "$APP" || { echo "解除失败，请按《打开方法.txt》操作。"; pause_end; exit 1; }
   else
     exit 0
   fi
@@ -32,7 +36,7 @@ fi
 
 EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
 BIN="$APP/Contents/MacOS/${EXE}"
-OUT="$HOME/Desktop/ApexDrift性能测试-$(date +%m%d-%H%M)"
+OUT="${APEX_PERF_OUT:-$HOME/Desktop/ApexDrift性能测试-$(date +%m%d-%H%M)}"
 mkdir -p "$OUT"
 MARK="$OUT/.start"
 touch "$MARK"
@@ -58,13 +62,14 @@ tier_name() {
 }
 
 # 每一项：地图 画质档 秒数 截图间隔
-RUNS="TrainingPark 1 90 60
+DEFAULT_RUNS="TrainingPark 1 90 60
 FujiSakura 1 90 60
 MomijiTouge 1 90 60
 KuroshioCircuit 1 90 60
 FujiSakura 0 60 45
 FujiSakura 2 60 45
 FujiSakura 3 60 45"
+RUNS="${APEX_PERF_RUNS:-$DEFAULT_RUNS}"
 TOTAL=$(echo "$RUNS" | wc -l | tr -d ' ')
 
 echo "开始测试，共 ${TOTAL} 项，约 13 分钟。测试期间请别碰鼠标和键盘。"
@@ -77,7 +82,7 @@ echo "$RUNS" | while read -r MAP TIER SECS SHOT; do
   echo "[${N}/${TOTAL}] ${MAP}，画质 $(tier_name "$TIER")，${SECS} 秒……"
   T0=$(date +%s)
   "$BIN" -ApexBench -ApexBenchAuto -ApexBenchSecs="${SECS}" -ApexBenchShots="${SHOT}" \
-    -ApexMap="${MAP}" -ApexTier="${TIER}" -ApexBenchLabel="${LABEL}" </dev/null >/dev/null 2>&1 &
+    -ApexMap="${MAP}" -ApexTier="${TIER}" -ApexBenchLabel="${LABEL}" $EXTRA </dev/null >/dev/null 2>&1 &
   P=$!
   LIMIT=$((SECS + 180))
   i=0
@@ -120,5 +125,6 @@ else
   echo "完成 ${COUNT}/${TOTAL} 项。结果在：${OUT}"
 fi
 echo "把这个文件夹压缩（右键 → 压缩）后发给开发者即可。"
-open "$OUT"
-read -r -p "按回车关闭 " _
+[ -n "${APEX_NO_PROMPT:-}" ] || open "$OUT"
+pause_end
+[ "$COUNT" = "$TOTAL" ]

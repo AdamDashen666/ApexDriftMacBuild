@@ -52,6 +52,20 @@ jobs:
           for f in "$OUT"/verify/mac_*_auto.txt; do [ -f "$f" ] && { echo "== $(basename "$f")"; head -15 "$f"; }; done
           for f in "$OUT"/verify/mac_*.json; do [ -f "$f" ] && { echo "== $(basename "$f")"; head -4 "$f"; }; done
           find ~/Library/Logs/DiagnosticReports -name "*ApexDrift*" -exec cp {} "$OUT/verify/" \; 2>/dev/null || true
+          # 构建机是全新的：跑分模式不该写出存档
+          if find ~/Library -name "ApexDriftProfile_v2.sav" 2>/dev/null | grep -q .; then echo "::warning::跑分写了存档"; else echo "跑分没有写存档"; fi
+
+      # dmg 里给玩家的性能测试脚本：用无渲染模式、两项短测试完整跑一遍（找 App、启动、收结果、出汇总表）
+      - name: Perf script self-test (no rendering)
+        continue-on-error: true
+        run: |
+          hdiutil attach -nobrowse -readonly "$RUNNER_TEMP/ApexDrift-mac.dmg" -mountpoint /Volumes/APEXDRIFT
+          cp /Volumes/APEXDRIFT/*.command "$RUNNER_TEMP/"
+          ls -la /Volumes/APEXDRIFT
+          hdiutil detach /Volumes/APEXDRIFT
+          APEX_NO_PROMPT=1 APEX_PERF_OUT="$OUT/verify/perf" APEX_EXTRA_ARGS="-nullrhi -unattended -UseFixedTimeStep" \
+            APEX_PERF_RUNS=$'TrainingPark 1 20 0\nFujiSakura 3 20 0' bash "$RUNNER_TEMP"/*.command
+          ls -la "$OUT/verify/perf"
 
       - name: Upload results to private repo
         if: always()
