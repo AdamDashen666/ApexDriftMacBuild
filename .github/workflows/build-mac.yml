@@ -54,11 +54,17 @@ jobs:
           du -sh "$UE"
 
       - name: Engine dependencies (Mac only)
+        timeout-minutes: 40
         run: |
           cd "$UE"
-          EX=""; # 只排除 Windows、Linux：UAT 启动时要编所有平台的打包脚本，排除 iOS 等会缺资源编不过
-          for p in Win64 Win32 Linux LinuxArm64; do EX="$EX --exclude=$p"; done
-          ./Setup.sh --force $EX > "$OUT/logs/setup.log" 2>&1 || { tail -20 "$OUT/logs/setup.log" | grep -v -E '^\s*$'; exit 1; }
+          # 不能排除 iOS/tvOS/visionOS：UAT 启动时要编这些平台的打包脚本，缺资源会编不过
+          EX=""; for p in Win64 Win32 Linux LinuxArm64 Android HoloLens; do EX="$EX --exclude=$p"; done
+          # --no-cache：默认还会另存最多 2 倍下载量的缓存，会把构建机硬盘撑满（2026-11 第二次构建因此失联）
+          ( while sleep 60; do df -h /System/Volumes/Data | awk 'NR==2{print "空闲 " $4}'; done ) &
+          W=$!
+          ./Setup.sh --force --no-cache $EX > "$OUT/logs/setup.log" 2>&1 || { kill $W; tail -c 3000 "$OUT/logs/setup.log"; exit 1; }
+          kill $W
+          tail -c 300 "$OUT/logs/setup.log"; echo
           du -sh "$UE"; df -h /System/Volumes/Data
           # 统一时间戳：缓存恢复的编译产物比源码新，UBT 才会跳过已编过的部分
           find "$UE/Engine/Source" "$UE/Engine/Plugins" "$UE/Engine/Shaders" "$PROJ/Source" -type f -exec touch -t 202001010000 {} +
