@@ -123,25 +123,13 @@ jobs:
           key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
           restore-keys: ue-mac-${{ env.UE_REF }}-
 
-      # 打包工具 UnrealPak 是引擎程序，编译产物在引擎目录里，单独缓存（和上面的缓存分开，互不影响）
-      - name: Restore engine tools cache
-        id: restore_tools
-        continue-on-error: true
-        timeout-minutes: 10
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            UnrealEngine/Engine/Intermediate/Build/Mac
-            UnrealEngine/Engine/Binaries/Mac
-          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
-          restore-keys: ue-mac-tools-${{ env.UE_REF }}-
-
+      # 不要缓存引擎目录（Engine/Binaries/Mac、Engine/Intermediate/Build/Mac）：2026-11 第 8、9 次恢复了它以后，
+      # UAT 自己的 .NET 构建产出空文件 / 坏 dll，起不来；不缓存时（第 3、5、6 次）正常。UnrealPak 每次重编只多几分钟
       - name: Discard half-restored cache
-        if: steps.restore_build.outcome != 'success' || steps.restore_tools.outcome != 'success'
+        if: steps.restore_build.outcome != 'success'
         run: |
           echo "::warning::恢复编译缓存失败，删掉可能不完整的目录，这次从头完整编译"
-          if [ "${{ steps.restore_build.outcome }}" != success ]; then rm -rf project/Intermediate/Build project/Binaries; fi
-          if [ "${{ steps.restore_tools.outcome }}" != success ]; then rm -rf UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac; fi
+          rm -rf project/Intermediate/Build project/Binaries
           df -h /System/Volumes/Data | tail -1
 
       # 完整输出只写进日志文件（会传到私有仓库），公开日志里只打印结果行，不打印引擎源码片段
@@ -198,7 +186,7 @@ jobs:
           pkill -x xcodebuild || true
           sleep 3; sync; sudo purge || true
           memory_pressure | tail -1; sysctl -n vm.swapusage
-          du -sh project/Intermediate/Build project/Binaries UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac 2>/dev/null || true
+          du -sh project/Intermediate/Build project/Binaries 2>/dev/null || true
 
       - name: Save build cache
         if: always() && steps.build.outcome != 'skipped'
@@ -208,15 +196,6 @@ jobs:
             project/Intermediate/Build
             project/Binaries
           key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
-
-      - name: Save engine tools cache
-        if: always() && steps.build.outcome != 'skipped'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            UnrealEngine/Engine/Intermediate/Build/Mac
-            UnrealEngine/Engine/Binaries/Mac
-          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
 
       - name: Sign and make dmg
         run: |
