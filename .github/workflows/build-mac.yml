@@ -39,7 +39,10 @@ jobs:
           sudo xcode-select -s "$KEEP"
           for x in /Applications/Xcode*.app; do [ -L "$x" ] || [ "$x" = "$KEEP" ] || sudo rm -rf "$x" & done; wait
           sudo rm -rf ~/Library/Android /usr/local/share/android-sdk "$RUNNER_TOOL_CACHE"/* ~/.dotnet /usr/local/share/dotnet ~/.ghcup ~/.rustup ~/.cargo 2>/dev/null || true
+          # 构建机只有 3 核 7GB 内存：关掉 Spotlight，别让它去索引几十 GB 的源码和编译产物
+          sudo mdutil -a -i off >/dev/null 2>&1 || true
           xcodebuild -version; df -h /System/Volumes/Data
+          memory_pressure | tail -1; sysctl -n vm.swapusage
           mkdir -p "$OUT/logs"
 
       - name: UE source
@@ -88,23 +91,52 @@ jobs:
           key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
           restore-keys: ue-mac-${{ env.UE_REF }}-
 
+      # 打包工具 UnrealPak 是引擎程序，编译产物在引擎目录里，单独缓存（和上面的缓存分开，互不影响）
+      - name: Restore engine tools cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            UnrealEngine/Engine/Intermediate/Build/Mac
+            UnrealEngine/Engine/Binaries/Mac
+          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
+          restore-keys: ue-mac-tools-${{ env.UE_REF }}-
+
       # 完整输出只写进日志文件（会传到私有仓库），公开日志里只打印结果行，不打印引擎源码片段
       - name: Build, stage, package
         id: build
         timeout-minutes: 310
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
         run: |
           cd "$UE"
           T0=$(date +%s)
           set +e
-          # 每 5 分钟在公开日志里报一次进度：只打印 UBT 的 [已完成/总数] 计数，不打印任何源码内容
-          ( while sleep 300; do
+          # 7GB 内存同时跑 3 个编译再加主程序链接会把构建机压垮（2026-11 第 4 次构建失联），最多并行 2 个
+          mkdir -p Engine/Saved/UnrealBuildTool
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8" ?>' \
+            '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">' \
+            '  <BuildConfiguration><MaxParallelActions>2</MaxParallelActions></BuildConfiguration>' \
+            '</Configuration>' > Engine/Saved/UnrealBuildTool/BuildConfiguration.xml
+          # 心跳：每 2 分钟把进度、内存、交换区、磁盘、最占内存的进程写进私有仓库 release heartbeat，
+          # 构建机失联时公开日志会整个丢掉，靠它看最后的状态。公开日志只打印计数和内存数字。
+          HB="$OUT/logs/heartbeat-${{ github.run_number }}.txt"
+          gh release view heartbeat -R "$PRIVATE_REPO" >/dev/null 2>&1 || \
+            gh release create heartbeat -R "$PRIVATE_REPO" --prerelease --title "构建机心跳" --notes "每次 Mac 构建的状态记录，构建机失联时看最后一次。" >/dev/null 2>&1
+          ( while sleep 120; do
               P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log" 2>/dev/null | tail -1)
-              echo "进度 $(( ($(date +%s) - T0) / 60 )) 分钟：编译 ${P:-尚未开始}"
+              M=$(memory_pressure 2>/dev/null | tail -1 | grep -o -E '[0-9]+%')
+              SW=$(sysctl -n vm.swapusage | awk '{print $6}')
+              D=$(df -h /System/Volumes/Data | awk 'NR==2{print $4}')
+              echo "进度 $(( ($(date +%s) - T0) / 60 )) 分钟：编译 ${P:-尚未开始}，空闲内存 ${M}，交换区已用 ${SW}，磁盘空闲 ${D}"
+              { date; echo "用时 $(( ($(date +%s) - T0) / 60 )) 分钟  编译 ${P}"; memory_pressure 2>/dev/null | tail -12; sysctl vm.swapusage
+                df -h /System/Volumes/Data; ps -axo rss=,comm= | sort -rn | head -8; echo; tail -n 5 "$OUT/logs/uat.log"; } > "$HB" 2>&1
+              gh release upload heartbeat -R "$PRIVATE_REPO" "$HB" --clobber >/dev/null 2>&1 || true
             done ) &
           PROG=$!
+          # -DisableAdaptiveUnity：不用 git status 挑文件（UE 源码太大会超时），每次分组一致，缓存才稳定
           ./Engine/Build/BatchFiles/RunUAT.sh BuildCookRun -project="$PROJ/ApexDrift.uproject" -noP4 -platform=Mac \
             -clientconfig=Shipping -build -skipcook -stage -pak -iostore -package -archive -archivedirectory="$OUT/archive" \
-            -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
+            -ubtargs=-DisableAdaptiveUnity -nocompileeditor -utf8output -unattended > "$OUT/logs/uat.log" 2>&1
           CODE=$?
           kill $PROG 2>/dev/null
           echo "UAT 退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
@@ -121,6 +153,15 @@ jobs:
             project/Intermediate/Build
             project/Binaries
           key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
+
+      - name: Save engine tools cache
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            UnrealEngine/Engine/Intermediate/Build/Mac
+            UnrealEngine/Engine/Binaries/Mac
+          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
 
       - name: Sign and make dmg
         run: |
