@@ -57,9 +57,11 @@ jobs:
               'exec taskpolicy -b "$REAL" -T2 "${args[@]}"' > "$W/zstd"
             cp "$W/zstd" "$W/zstdmt"; chmod +x "$W/zstd" "$W/zstdmt"
             # 存 / 取缓存时 tar 读写几 GB 小文件，构建机会卡死（第 5、10 次存缓存、第 7 次解压时心跳全停）：
-            # tar 和 zstd 都用 taskpolicy -b（后台优先级，磁盘读写限流）跑，把磁盘让给系统和 runner 的连接
+            # 打包缓存时 tar 和 zstd 用 taskpolicy -b（后台优先级，磁盘读写限流）跑；解压不限流（第 12、13 次限流解压慢到 14 分钟以上）
             GT=$(command -v gtar || true)
-            if [ -n "$GT" ]; then printf '%s\n' '#!/bin/bash' "exec taskpolicy -b $GT \"\$@\"" > "$W/gtar"; chmod +x "$W/gtar"; fi
+            if [ -n "$GT" ]; then printf '%s\n' '#!/bin/bash' \
+              "for a in \"\$@\"; do case \"\$a\" in -x*|--extract) exec $GT \"\$@\";; esac; done" \
+              "exec taskpolicy -b $GT \"\$@\"" > "$W/gtar"; chmod +x "$W/gtar"; fi
             echo "$W" >> "$GITHUB_PATH"
             echo "zstd 包装：$REAL"
           fi
@@ -118,8 +120,9 @@ jobs:
           rm -rf "$RUNNER_TEMP/cooked"
           ls "$PROJ/Saved/Cooked/Mac/ApexDrift/Content/Maps" | grep umap; du -sh "$PROJ/Saved/Cooked/Mac"
 
-      # 恢复缓存失败不该让整次构建失败（2026-11 第 7 次构建解压缓存时构建机卡住 9 分钟后这一步失败）：
-      # 失败就删掉可能只解了一半的目录，从头完整编译（约 2–3 小时，仍在 6 小时内）
+      # 编译中间文件放在磁盘映像（sparseimage）里缓存，用时挂载到原位置：存 / 取缓存只读写一个大文件。
+      # 以前直接打包几万个小文件，构建机解压 / 压缩时多次卡死或慢到 14 分钟以上（2026-11 第 5、7、10、12、13 次）。
+      # 恢复失败不让整次构建失败：删掉可能不完整的映像，这部分从头编（全量约 3 小时，仍在 6 小时内）
       - name: Restore build cache
         id: restore_build
         continue-on-error: true
@@ -127,10 +130,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            project/Intermediate/Build
+            bcache/build.sparseimage
             project/Binaries
-          key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
-          restore-keys: ue-mac-${{ env.UE_REF }}-
+          key: ue-mac-img-${{ env.UE_REF }}-${{ github.run_id }}
+          restore-keys: ue-mac-img-${{ env.UE_REF }}-
 
       # 打包工具 UnrealPak 是引擎程序，产物在引擎目录里，单独缓存：不缓存它每次要多编约 260 步、15 分钟。
       # （2026-11 一度以为它害 UAT 起不来而去掉，后来查明是 UAT 并行编 .NET 脚本的竞争，和它无关；这里不含 .NET 产物）
@@ -141,18 +144,26 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            UnrealEngine/Engine/Intermediate/Build/Mac
+            bcache/tools.sparseimage
             UnrealEngine/Engine/Binaries/Mac
-          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
-          restore-keys: ue-mac-tools-${{ env.UE_REF }}-
+          key: ue-mac-tools-img-${{ env.UE_REF }}-${{ github.run_id }}
+          restore-keys: ue-mac-tools-img-${{ env.UE_REF }}-
 
-      - name: Discard half-restored cache
-        if: steps.restore_build.outcome != 'success' || steps.restore_tools.outcome != 'success'
+      - name: Mount cache images
         run: |
-          echo "::warning::恢复缓存失败，删掉可能不完整的目录，这部分从头编译"
-          if [ "${{ steps.restore_build.outcome }}" != success ]; then rm -rf project/Intermediate/Build project/Binaries; fi
-          if [ "${{ steps.restore_tools.outcome }}" != success ]; then rm -rf UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac; fi
-          df -h /System/Volumes/Data | tail -1
+          if [ "${{ steps.restore_build.outcome }}" != success ]; then echo "::warning::恢复编译缓存失败，这部分从头编"; rm -rf bcache/build.sparseimage project/Binaries; fi
+          if [ "${{ steps.restore_tools.outcome }}" != success ]; then echo "::warning::恢复工具缓存失败，这部分从头编"; rm -rf bcache/tools.sparseimage UnrealEngine/Engine/Binaries/Mac; fi
+          mkdir -p bcache "$PROJ/Intermediate/Build" "$UE/Engine/Intermediate/Build/Mac"
+          # $1 映像  $2 挂载点；没有缓存就新建一个空的（稀疏映像，实际只占用写进去的部分）
+          mount_img() {
+            if [ -f "$1" ]; then echo "缓存映像 $1：$(du -h "$1" | cut -f1)"
+            else hdiutil create -quiet -size 80g -type SPARSE -fs HFS+ -volname "$(basename "$1" .sparseimage)" "${1%.sparseimage}" && echo "新建空映像 $1"; fi
+            hdiutil attach "$1" -mountpoint "$2" -nobrowse -noautoopen -quiet && return 0
+            echo "::warning::挂载 $1 失败，删掉它，这部分用普通目录从头编"; rm -f "$1"
+          }
+          mount_img bcache/build.sparseimage "$PROJ/Intermediate/Build"
+          mount_img bcache/tools.sparseimage "$UE/Engine/Intermediate/Build/Mac"
+          df -h "$PROJ/Intermediate/Build" "$UE/Engine/Intermediate/Build/Mac" /System/Volumes/Data
 
       # 完整输出只写进日志文件（会传到私有仓库），公开日志里只打印结果行，不打印引擎源码片段
       - name: Build, stage, package
@@ -225,7 +236,7 @@ jobs:
             --notes "UE ${UE_REF} 源码编译，Apple 芯片，临时签名（未经苹果公证）。构建：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh release upload "$TAG" -R "$PRIVATE_REPO" --clobber "$RUNNER_TEMP/build-logs-${{ github.run_number }}.tgz"
 
-      # 存缓存前先腾内存：UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB
+      # 存缓存前先腾内存（UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB），再卸下缓存映像
       - name: Free memory before saving cache
         if: always() && steps.build.outcome != 'skipped'
         run: |
@@ -235,7 +246,13 @@ jobs:
           pkill -x xcodebuild || true
           sleep 3; sync; sudo purge || true
           memory_pressure | tail -1; sysctl -n vm.swapusage
-          du -sh project/Intermediate/Build project/Binaries UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac 2>/dev/null || true
+          # 卸下缓存映像再存；compact 收回删掉的文件占的空间，映像才不会一次比一次大
+          for m in "$PROJ/Intermediate/Build" "$UE/Engine/Intermediate/Build/Mac"; do
+            mount | grep -q " on $m " || continue
+            hdiutil detach "$m" -quiet || { sleep 5; hdiutil detach "$m" -force -quiet; } || echo "::warning::卸载 $m 失败"
+          done
+          for i in bcache/*.sparseimage; do [ -f "$i" ] && perl -e 'alarm 300; exec @ARGV' hdiutil compact "$i" -quiet; done
+          ls -la bcache; du -sh project/Binaries UnrealEngine/Engine/Binaries/Mac 2>/dev/null || true
 
       - name: Save build cache
         if: always() && steps.build.outcome != 'skipped'
@@ -244,9 +261,9 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            project/Intermediate/Build
+            bcache/build.sparseimage
             project/Binaries
-          key: ue-mac-${{ env.UE_REF }}-${{ github.run_id }}
+          key: ue-mac-img-${{ env.UE_REF }}-${{ github.run_id }}
 
       - name: Save engine tools cache
         if: always() && steps.build.outcome != 'skipped'
@@ -255,9 +272,9 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            UnrealEngine/Engine/Intermediate/Build/Mac
+            bcache/tools.sparseimage
             UnrealEngine/Engine/Binaries/Mac
-          key: ue-mac-tools-${{ env.UE_REF }}-${{ github.run_id }}
+          key: ue-mac-tools-img-${{ env.UE_REF }}-${{ github.run_id }}
 
       - name: Sign and make dmg
         run: |
