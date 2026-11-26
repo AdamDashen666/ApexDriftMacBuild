@@ -195,6 +195,17 @@ jobs:
             find Engine/Source/Programs -type d \( -name uatobj -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null
             run_uat; CODE=$?
           done
+          # 编译跑完后最后一步失败（UAT 打包阶段用 xcodebuild 收尾：拷资源、编图标 Assets.xcassets、签名）：第 5 次
+          # “App finalization failed” 后 UE 自己重试才过，第 10 次退出码 6，当时 ibtoold（编图标的工具）还挂着，像是 3 核忙满时偶发超时。
+          # 没有编译 / 链接错误时整个 UAT 再跑一次（编译已是最新，只花几分钟）；第一次的日志留作 uat-before-retry.log
+          if [ $CODE -ne 0 ] && grep -a -q -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log" && \
+             ! grep -a -q -E '\.(cpp|h|hpp|inl|mm|m):[0-9]+(:[0-9]+)?: (fatal )?error|Undefined symbols|symbol\(s\) not found' "$OUT/logs/uat.log"; then
+            echo "::warning::编译后的步骤失败（退出码 ${CODE}），代码没有编译错误，整个 UAT 再跑一次"
+            grep -a -E 'App finalization failed|xcodebuild.*(failed|error)|\*\* BUILD FAILED|ExitCode=' "$OUT/logs/uat.log" | head -5
+            mv "$OUT/logs/uat.log" "$OUT/logs/uat-before-retry.log"
+            pkill -x ibtoold 2>/dev/null; pkill -f IBAgent 2>/dev/null; pkill -x xcodebuild 2>/dev/null
+            run_uat; CODE=$?
+          fi
           kill $PROG 2>/dev/null
           echo "UAT 退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
           grep -c -E "\] Compile " "$OUT/logs/uat.log" | sed 's/^/编译步骤数 /' || true
