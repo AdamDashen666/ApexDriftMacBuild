@@ -2,6 +2,7 @@
 #include "Core/ApexDriftSaveGame.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMemory.h"
 #include "Engine/Engine.h"
 
 namespace
@@ -206,7 +207,13 @@ void FApexGraphicsSettingsManager::ApplyGraphicsTier(UWorld* World, EApexGraphic
 	SetCVarInt(TEXT("r.TSR.ShadingRejection.Flickering"), bPerf ? 0 : 1);
 
 	SetCVarInt(TEXT("r.ContactShadows"), bPerf ? 0 : 1);
+#if PLATFORM_MAC
+	// Mac 是统一内存，系统和显存共用：8GB 的机器再给 5GB 贴图池会严重换页
+	const uint32 RamGB = FPlatformMemory::GetConstants().TotalPhysicalGB;
+	SetCVarInt(TEXT("r.Streaming.PoolSize"), RamGB <= 8 ? 1800 : (RamGB <= 16 ? 3500 : 5000));
+#else
 	SetCVarInt(TEXT("r.Streaming.PoolSize"), 5000);
+#endif
 }
 
 void FApexGraphicsSettingsManager::ApplyResolutionScaling(UWorld* World, EApexTSRMode Mode, int32 FrameTargetIndex)
