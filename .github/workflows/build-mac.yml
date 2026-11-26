@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Free disk, pick Xcode
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
         run: |
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; sw_vers
           KEEP=/Applications/Xcode_26.1.1.app
@@ -44,6 +46,31 @@ jobs:
           xcodebuild -version; df -h /System/Volumes/Data
           memory_pressure | tail -1; sysctl -n vm.swapusage
           mkdir -p "$OUT/logs"
+          # actions/cache 存缓存时用 “zstd -T0 --long=30” 压缩：1GB 窗口 × 多线程，在 7GB 内存的构建机上会把机器压垮
+          # （2026-11 第 5 次构建编译成功后在存缓存时失联）。放一个包装：压缩时去掉 --long、限 2 线程；解压原样，旧缓存照样能读
+          REAL=$(command -v zstd || true)
+          if [ -n "$REAL" ]; then
+            W="$RUNNER_TEMP/zstdwrap"; mkdir -p "$W"
+            printf '%s\n' '#!/bin/bash' "REAL=$REAL" \
+              'for a in "$@"; do case "$a" in -d|--decompress|-dc|-cd) exec "$REAL" "$@";; esac; done' \
+              'args=(); for a in "$@"; do case "$a" in --long*|-T*) ;; *) args+=("$a");; esac; done' \
+              'exec "$REAL" -T2 "${args[@]}"' > "$W/zstd"
+            cp "$W/zstd" "$W/zstdmt"; chmod +x "$W/zstd" "$W/zstdmt"
+            echo "$W" >> "$GITHUB_PATH"
+            echo "zstd 包装：$REAL"
+          fi
+          # 心跳：整个任务期间每分钟把内存、交换区、磁盘、最占内存的进程和编译进度传到私有仓库 release heartbeat。
+          # 构建机失联时作业日志会整个丢掉，靠它看最后的状态；后台进程会一直活到任务结束
+          gh release view heartbeat -R "$PRIVATE_REPO" >/dev/null 2>&1 || \
+            gh release create heartbeat -R "$PRIVATE_REPO" --prerelease --title "构建机心跳" --notes "每次 Mac 构建的状态记录，构建机失联时看最后一次。" >/dev/null 2>&1 || true
+          HB="$OUT/logs/heartbeat-${{ github.run_number }}.txt"
+          nohup bash -c 'while true; do
+              { date; uptime; memory_pressure 2>/dev/null | tail -1; sysctl vm.swapusage; df -h /System/Volumes/Data | tail -1
+                echo; ps -axo rss=,pcpu=,comm= | sort -rn | head -10
+                echo; grep -a -o -E "^\[[0-9]+/[0-9]+\]" "$OUT/logs/uat.log" 2>/dev/null | tail -1; tail -n 3 "$OUT/logs/uat.log" 2>/dev/null; } > "$0" 2>&1
+              gh release upload heartbeat -R "$1" "$0" --clobber >/dev/null 2>&1
+              sleep 60
+            done' "$HB" "$PRIVATE_REPO" >/dev/null 2>&1 &
 
       - name: UE source
         env:
@@ -105,8 +132,6 @@ jobs:
       - name: Build, stage, package
         id: build
         timeout-minutes: 310
-        env:
-          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
         run: |
           cd "$UE"
           T0=$(date +%s)
@@ -117,20 +142,12 @@ jobs:
             '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">' \
             '  <BuildConfiguration><MaxParallelActions>2</MaxParallelActions></BuildConfiguration>' \
             '</Configuration>' > Engine/Saved/UnrealBuildTool/BuildConfiguration.xml
-          # 心跳：每 2 分钟把进度、内存、交换区、磁盘、最占内存的进程写进私有仓库 release heartbeat，
-          # 构建机失联时公开日志会整个丢掉，靠它看最后的状态。公开日志只打印计数和内存数字。
-          HB="$OUT/logs/heartbeat-${{ github.run_number }}.txt"
-          gh release view heartbeat -R "$PRIVATE_REPO" >/dev/null 2>&1 || \
-            gh release create heartbeat -R "$PRIVATE_REPO" --prerelease --title "构建机心跳" --notes "每次 Mac 构建的状态记录，构建机失联时看最后一次。" >/dev/null 2>&1
-          ( while sleep 120; do
+          # 公开日志每 5 分钟报一次：只打印编译计数和内存数字（详细心跳在私有仓库）
+          ( while sleep 300; do
               P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/uat.log" 2>/dev/null | tail -1)
               M=$(memory_pressure 2>/dev/null | tail -1 | grep -o -E '[0-9]+%')
               SW=$(sysctl -n vm.swapusage | awk '{print $6}')
-              D=$(df -h /System/Volumes/Data | awk 'NR==2{print $4}')
-              echo "进度 $(( ($(date +%s) - T0) / 60 )) 分钟：编译 ${P:-尚未开始}，空闲内存 ${M}，交换区已用 ${SW}，磁盘空闲 ${D}"
-              { date; echo "用时 $(( ($(date +%s) - T0) / 60 )) 分钟  编译 ${P}"; memory_pressure 2>/dev/null | tail -12; sysctl vm.swapusage
-                df -h /System/Volumes/Data; ps -axo rss=,comm= | sort -rn | head -8; echo; tail -n 5 "$OUT/logs/uat.log"; } > "$HB" 2>&1
-              gh release upload heartbeat -R "$PRIVATE_REPO" "$HB" --clobber >/dev/null 2>&1 || true
+              echo "进度 $(( ($(date +%s) - T0) / 60 )) 分钟：编译 ${P:-尚未开始}，空闲内存 ${M}，交换区已用 ${SW}"
             done ) &
           PROG=$!
           # -DisableAdaptiveUnity：不用 git status 挑文件（UE 源码太大会超时），每次分组一致，缓存才稳定
@@ -144,6 +161,18 @@ jobs:
           grep -E "BUILD (SUCCESSFUL|FAILED)|AutomationTool exiting|Total execution time|Result: " "$OUT/logs/uat.log" | tail -10
           grep -o -E "[A-Za-z0-9_./-]+\.(cpp|h|mm|cs):[0-9]+(:[0-9]+)?: (fatal )?error" "$OUT/logs/uat.log" | sort -u | head -20
           exit $CODE
+
+      # 存缓存前先腾内存：UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB
+      - name: Free memory before saving cache
+        if: always() && steps.build.outcome != 'skipped'
+        run: |
+          memory_pressure | tail -1
+          pkill -f "UnrealEngine/Engine/Binaries/ThirdParty/DotNet" || true
+          pkill -f "UnrealEngine/Engine/Binaries/Mac/Uba" || true
+          pkill -x xcodebuild || true
+          sleep 3; sync; sudo purge || true
+          memory_pressure | tail -1; sysctl -n vm.swapusage
+          du -sh project/Intermediate/Build project/Binaries UnrealEngine/Engine/Intermediate/Build/Mac UnrealEngine/Engine/Binaries/Mac 2>/dev/null || true
 
       - name: Save build cache
         if: always() && steps.build.outcome != 'skipped'
