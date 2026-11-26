@@ -1,0 +1,60 @@
+name: Verify Mac
+
+# 手动触发：从私有仓库下载某次构建的 dmg，装好后用 -nullrhi（不渲染）在每张图上跑游戏自带的自动漂移测试，
+# 验证 Mac 版能读 Windows 烘焙的内容、地图/车辆/物理逻辑正常。
+# 构建机的虚拟显卡只到 Apple5，UE 5.9 要求 Apple7（M1 起），所以这里验证不了画面和着色器。
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 私有仓库 release 名（mac-build-N）
+        default: mac-build-3
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      PRIVATE_REPO: AdamDashen666/ApexDriftMac
+      OUT: ${{ github.workspace }}/out
+    steps:
+      - name: Get dmg
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          mkdir -p "$OUT/verify"
+          gh release download "${{ inputs.build }}" -R "$PRIVATE_REPO" -p 'ApexDrift-mac.dmg' -D "$RUNNER_TEMP"
+          hdiutil attach -nobrowse -readonly "$RUNNER_TEMP/ApexDrift-mac.dmg" -mountpoint /Volumes/APEXDRIFT
+          ls /Volumes/APEXDRIFT
+          ditto "/Volumes/APEXDRIFT/APEX DRIFT.app" "$HOME/Applications/APEX DRIFT.app"
+          hdiutil detach /Volumes/APEXDRIFT
+          APP="$HOME/Applications/APEX DRIFT.app"
+          codesign --verify --deep --strict "$APP" && echo "签名有效"
+          echo "BIN=$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")" >> "$GITHUB_ENV"
+
+      - name: Auto drift lap on each map (no rendering)
+        continue-on-error: true
+        run: |
+          for m in TrainingPark FujiSakura MomijiTouge KuroshioCircuit; do
+            T0=$(date +%s)
+            "$BIN" -nullrhi -unattended -ApexBench -ApexBenchAuto -ApexBenchSecs=150 -ApexMap=$m -ApexBenchLabel=mac_$m > "$OUT/verify/run_$m.log" 2>&1 &
+            P=$!
+            for i in $(seq 1 360); do kill -0 $P 2>/dev/null || break; sleep 1; done
+            if kill -0 $P 2>/dev/null; then kill -9 $P; echo "$m：6 分钟没结束，已强制关闭"; else wait $P; echo "$m：退出码 $?，用时 $(( $(date +%s) - T0 )) 秒"; fi
+          done
+          find ~/Library -path "*ApexDrift*" -name "mac_*" -type f 2>/dev/null | while read f; do cp "$f" "$OUT/verify/"; done
+          ls -la "$OUT/verify"
+          for f in "$OUT"/verify/mac_*_auto.txt; do [ -f "$f" ] && { echo "== $(basename "$f")"; head -15 "$f"; }; done
+          for f in "$OUT"/verify/mac_*.json; do [ -f "$f" ] && { echo "== $(basename "$f")"; head -4 "$f"; }; done
+          find ~/Library/Logs/DiagnosticReports -name "*ApexDrift*" -exec cp {} "$OUT/verify/" \; 2>/dev/null || true
+
+      - name: Upload results to private repo
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
+        run: |
+          tar -czf "$RUNNER_TEMP/verify-${{ github.run_number }}.tgz" -C "$OUT" verify
+          gh release upload "${{ inputs.build }}" -R "$PRIVATE_REPO" --clobber "$RUNNER_TEMP/verify-${{ github.run_number }}.tgz"
