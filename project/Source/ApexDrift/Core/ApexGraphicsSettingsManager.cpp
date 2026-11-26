@@ -3,6 +3,8 @@
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMemory.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Engine/Engine.h"
 
 namespace
@@ -128,7 +130,14 @@ void FApexGraphicsSettingsManager::ApplyAllSettings(UWorld* World, const UApexDr
 	{
 		return;
 	}
-	ApplyGraphicsTier(World, SaveData->GraphicsTier);
+	// 跑分时 -ApexTier=0..3（极速 / 均衡 / 高画质 / 光追电影级）临时换档，不改存档
+	EApexGraphicsTier Tier = SaveData->GraphicsTier;
+	int32 TierArg = -1;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ApexTier="), TierArg) && TierArg >= 0 && TierArg <= static_cast<int32>(EApexGraphicsTier::Cinematic))
+	{
+		Tier = static_cast<EApexGraphicsTier>(TierArg);
+	}
+	ApplyGraphicsTier(World, Tier);
 	ApplyResolutionScaling(World, SaveData->TSRMode, SaveData->FrameTargetIndex);
 	ApplyMotionBlur(SaveData->bMotionBlur);
 	if (bApplyVideoMode)

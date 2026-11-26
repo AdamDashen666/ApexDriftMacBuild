@@ -181,7 +181,8 @@ jobs:
           find "$APP" \( -name "*.metallib" -o -name "*.metalmap" \) -exec ls -la {} \; | awk '{print $5, $NF}' | sed "s#.*/Contents/#Contents/#"
           for sm in sm5 sm6; do find "$APP" -iname "*metal_${sm}*" | grep -q . && echo "着色器 ${sm}：有" || echo "::warning::包里没找到 ${sm} 的着色器库文件（也可能打进了 pak）"; done
           cp "$PROJ/CREDITS.txt" "$STAGE/"
-          cp mac/打开方法.txt "$STAGE/"
+          cp mac/*.txt mac/*.command "$STAGE/"
+          chmod +x "$STAGE"/*.command
           ln -s /Applications "$STAGE/Applications"
           for i in 1 2 3; do hdiutil create -volname "APEX DRIFT" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$OUT/ApexDrift-mac.dmg" && break; sleep 10; done
           hdiutil verify "$OUT/ApexDrift-mac.dmg"
