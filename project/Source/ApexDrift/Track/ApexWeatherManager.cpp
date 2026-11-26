@@ -451,9 +451,22 @@ void AApexWeatherManager::SetTrackStreetLightsIntensity(float IntensityMultiplie
 			if (!LC) continue;
 			++NumLights;
 			LC->SetMobility(EComponentMobility::Movable);
+			const bool bFlood = Actor->ActorHasTag(FName("FloodTower"));
 			// 统一用坎德拉：路灯约 6m 高，灯塔约 15m 高
-			if (ULocalLightComponent* LL = Cast<ULocalLightComponent>(LC)) LL->SetIntensityUnits(ELightUnits::Candelas);
-			const float BaseIntensity = Actor->ActorHasTag(FName("FloodTower")) ? 5000.0f * GetSetup(MapId, CurrentWeatherIndex).FloodScale : 260.0f;
+			if (ULocalLightComponent* LL = Cast<ULocalLightComponent>(LC))
+			{
+				LL->SetIntensityUnits(ELightUnits::Candelas);
+				// 富士、红枫的灯在关卡里是固定灯，搭关卡时设的半径被忽略了（停在默认 10m）。
+				// 这里补成 build_map_fuji/momiji.py 的设计值：路灯 19m、灯塔 38m，只往大调。
+				// 黑潮、训练场的灯另有各自的半径，不动
+				const bool bJapanMap = (MapId == TEXT("FujiSakura") || MapId == TEXT("MomijiTouge"));
+				const float DesignRadius = bFlood ? 3800.0f : 1900.0f;
+				if (bJapanMap && LL->AttenuationRadius < DesignRadius)
+				{
+					LL->SetAttenuationRadius(DesignRadius);
+				}
+			}
+			const float BaseIntensity = bFlood ? 5000.0f * GetSetup(MapId, CurrentWeatherIndex).FloodScale : 260.0f;
 			LC->SetIntensity(BaseIntensity * IntensityMultiplier);
 			LC->SetVisibility(IntensityMultiplier > 0.3f);
 		}
