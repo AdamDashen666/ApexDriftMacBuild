@@ -1,0 +1,30 @@
+name: GPU probe
+
+# 打印构建机 Metal 设备支持的 GPU 家族。UE 5.9：Apple7 才能启动渲染，Apple8 + macOS 15 才用 SM6（Nanite）。
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: runs-on 标签
+        default: macos-latest
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Metal families
+        run: |
+          sw_vers; sysctl -n machdep.cpu.brand_string
+          cat > "$RUNNER_TEMP/probe.swift" <<'EOF'
+          import Metal
+          guard let d = MTLCreateSystemDefaultDevice() else { print("没有 Metal 设备"); exit(1) }
+          print("设备: \(d.name)  低功耗: \(d.isLowPower)  统一内存: \(d.hasUnifiedMemory)  推荐工作集: \(d.recommendedMaxWorkingSetSize / 1_048_576) MB")
+          let fams: [(String, MTLGPUFamily)] = [("Apple5", .apple5), ("Apple6", .apple6), ("Apple7", .apple7), ("Apple8", .apple8), ("Apple9", .apple9), ("Mac2", .mac2), ("Metal3", .metal3)]
+          for (n, f) in fams { print("\(n): \(d.supportsFamily(f))") }
+          print("光线追踪: \(d.supportsRaytracing)")
+          EOF
+          swift "$RUNNER_TEMP/probe.swift"
