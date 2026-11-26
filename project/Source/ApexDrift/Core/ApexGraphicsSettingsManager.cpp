@@ -28,6 +28,18 @@ namespace
 
 FIntPoint FApexGraphicsSettingsManager::GetResolutionFromIndex(int32 Index)
 {
+#if PLATFORM_MAC
+	// Mac 屏幕多是 16:10；无边框全屏直接用桌面分辨率，这几档只在窗口 / 独占全屏模式下用
+	switch (Index)
+	{
+	case 0: return FIntPoint(1280, 800);
+	case 1: return FIntPoint(1440, 900);
+	case 3: return FIntPoint(2560, 1600);
+	case 2:
+	default:
+		return FIntPoint(1920, 1200);
+	}
+#else
 	switch (Index)
 	{
 	case 0: return FIntPoint(1280, 720);
@@ -37,10 +49,24 @@ FIntPoint FApexGraphicsSettingsManager::GetResolutionFromIndex(int32 Index)
 	default:
 		return FIntPoint(2560, 1440);
 	}
+#endif
 }
 
 int32 FApexGraphicsSettingsManager::GetFrameTargetFromIndex(int32 Index)
 {
+#if PLATFORM_MAC
+	// Mac 屏幕最高 120Hz（MacBook Air 等是 60Hz）。动态分辨率按这个帧率压分辨率，
+	// 目标高于屏幕刷新率只会把画面压糊，所以 Mac 用 30/60/90/120，默认档（索引 1）是 60。
+	switch (Index)
+	{
+	case 0: return 30;
+	case 2: return 90;
+	case 3: return 120;
+	case 1:
+	default:
+		return 60;
+	}
+#else
 	switch (Index)
 	{
 	case 0: return 120;
@@ -50,6 +76,7 @@ int32 FApexGraphicsSettingsManager::GetFrameTargetFromIndex(int32 Index)
 	default:
 		return 144;
 	}
+#endif
 }
 
 FString FApexGraphicsSettingsManager::GetTierLabel(EApexGraphicsTier Tier)
@@ -68,10 +95,15 @@ FString FApexGraphicsSettingsManager::GetTierDescription(EApexGraphicsTier Tier)
 {
 	switch (Tier)
 	{
+#if PLATFORM_MAC
+	case EApexGraphicsTier::Performance: return TEXT("关闭全局光照追踪，保留高质量贴图与阴影。M1、M2 等基础款芯片推荐。");
+	case EApexGraphicsTier::Cinematic:   return TEXT("开启光线追踪（M3 及以后的芯片有硬件加速，更早的芯片会很慢），用于截图与欣赏。");
+#else
 	case EApexGraphicsTier::Performance: return TEXT("关闭全局光照追踪，保留高质量贴图与阴影。适合 165–240Hz 竞速。");
+	case EApexGraphicsTier::Cinematic:   return TEXT("硬件光线追踪全开，用于截图与欣赏，帧率会明显降低。");
+#endif
 	case EApexGraphicsTier::Balanced:    return TEXT("轻量全局光照 + 屏幕空间与 Lumen 混合反射，画面与流畅度的最佳平衡。");
 	case EApexGraphicsTier::Quality:     return TEXT("高精度全局光照、完整 Lumen 反射和更远的植被细节。");
-	case EApexGraphicsTier::Cinematic:   return TEXT("硬件光线追踪全开，用于截图与欣赏，帧率会明显降低。");
 	default:                             return FString();
 	}
 }

@@ -6,7 +6,7 @@ UnrealEngine/
 project/Saved/
 project/Intermediate/
 project/Binaries/
-project/Build/
+project/Build/*/FileOpenOrder/
 project/Content/
 project/DerivedDataCache/
 *.pak
