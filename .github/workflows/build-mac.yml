@@ -172,6 +172,16 @@ jobs:
           cd "$UE"
           T0=$(date +%s); echo $T0 > "$RUNNER_TEMP/compile_t0"
           set +e
+          # 引擎源码自检（第 16 次：ICU、Imath 的头文件 git 里有，编译时却“找不到”，同一次 UAT 刚写出的文件是空的，像构建机磁盘出错）：
+          # 编译前查 git 里有、磁盘上没有的文件，有就从 git 恢复。公开日志只打印数量和所在目录名
+          git ls-files -d > "$RUNNER_TEMP/deleted.txt" 2>/dev/null
+          ND=$(wc -l < "$RUNNER_TEMP/deleted.txt" | tr -d ' ')
+          echo "引擎源码里缺的文件：${ND} 个"
+          if [ "${ND}" -gt 0 ]; then
+            cut -d/ -f1-4 "$RUNNER_TEMP/deleted.txt" | sort | uniq -c | sort -rn | head -10
+            git checkout --pathspec-from-file="$RUNNER_TEMP/deleted.txt" 2>&1 | tail -3
+            echo "恢复后还缺：$(git ls-files -d | wc -l | tr -d ' ') 个"
+          fi
           bash "$GITHUB_WORKSPACE/.github/scripts/ubt-config.sh" 2
           ( while sleep 300; do
               P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/compile.log" 2>/dev/null | tail -1)
