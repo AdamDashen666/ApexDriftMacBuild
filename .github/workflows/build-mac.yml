@@ -11,6 +11,10 @@ on:
       ue_ref:
         description: UE 源码标签（与本机烘焙用的引擎一致）
         default: 5.9.0-preview-2
+      fresh:
+        description: 不恢复编译缓存，从头编（2026-11-28 第 16–19 次：M1 虚拟机恢复 5GB 缓存后解压卡死，或之后读写出错）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -131,6 +135,7 @@ jobs:
       # 恢复失败不让整次构建失败：删掉可能不完整的映像，这部分从头编（全量约 3 小时，仍在 6 小时内）
       - name: Restore build cache
         id: restore_build
+        if: ${{ !inputs.fresh }}
         continue-on-error: true
         timeout-minutes: 20
         uses: actions/cache/restore@v4
@@ -145,6 +150,7 @@ jobs:
       # （2026-11 一度以为它害 UAT 起不来而去掉，后来查明是 UAT 并行编 .NET 脚本的竞争，和它无关；这里不含 .NET 产物）
       - name: Restore engine tools cache
         id: restore_tools
+        if: ${{ !inputs.fresh }}
         continue-on-error: true
         timeout-minutes: 10
         uses: actions/cache/restore@v4
