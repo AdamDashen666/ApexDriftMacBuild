@@ -185,10 +185,18 @@ jobs:
             echo "恢复后还缺：$(git ls-files -d | wc -l | tr -d ' ') 个"
           fi
           echo "ICU 78 头文件 $(ls Engine/Source/ThirdParty/ICU/icu4c-78_1/include/unicode 2>/dev/null | wc -l | tr -d ' ') 个，Imath 头文件 $(ls Engine/Source/ThirdParty/Imath/Deploy/Imath-3.2.2/include/Imath 2>/dev/null | wc -l | tr -d ' ') 个"
-          # UBT / UAT 的 .NET 工程串行编译：并行时多个 MSBuild 节点会同时写 EpicGames.Core 等共享引用程序集，
-          # 写坏后报 “PE image doesn't contain managed metadata”（第 8、9、11 次偶发；第 16、17 次在 3 核机器上连续发生）。
-          # MSBuild 会读项目所在目录及上级目录的 Directory.Build.rsp
-          printf '%s\n' '-maxcpucount:1' '-nodeReuse:false' > Engine/Source/Programs/Directory.Build.rsp
+          # UBT / UAT 的 .NET 工程：编出来的引用程序集读回来是坏的，报 “PE image doesn't contain managed metadata”
+          # （第 8、9、11 次偶发；第 16–18 次 M1 虚拟机 + 2026-11-23 映像上连续发生，串行编译也一样）。
+          # 串行编译、不用常驻的 C# 编译服务器（它按路径和时间缓存读过的程序集）。MSBuild 会读项目所在目录及上级目录的 Directory.Build.rsp
+          printf '%s\n' '-maxcpucount:1' '-nodeReuse:false' '-p:UseSharedCompilation=false' > Engine/Source/Programs/Directory.Build.rsp
+          # 先单独编一次 UBT，留下第一次的完整输出（UE 的重试脚本只显示最后一次）；失败了后面 RunUBT 还会再编
+          ( source Engine/Build/BatchFiles/Mac/SetupEnvironment.sh -dotnet "$UE/Engine/Build/BatchFiles/Mac" >/dev/null 2>&1
+            cd "$UE/Engine/Source" && dotnet build Programs/UnrealBuildTool/UnrealBuildTool.csproj -c Development -v minimal ) > "$OUT/logs/ubt-first.log" 2>&1
+          echo "单独编 UBT：退出码 $?"
+          grep -a -E ": (error|warning) [A-Z]+[0-9]+|error MSB|Killed|Abort|Unhandled" "$OUT/logs/ubt-first.log" | grep -v CS0246 | sed "s#$UE/##g" | head -8 | cut -c1-220
+          for f in Engine/Source/Programs/Shared/EpicGames.Core/obj/Development/net10.0/ref/EpicGames.Core.dll Engine/Source/Programs/Shared/EpicGames.Core/obj/Development/net10.0/refint/EpicGames.Core.dll; do
+            [ -f "$f" ] && echo "$(basename "$(dirname "$f")")/EpicGames.Core.dll $(stat -f %z "$f") 字节，开头 $(head -c 2 "$f" | xxd -p)"
+          done
           bash "$GITHUB_WORKSPACE/.github/scripts/ubt-config.sh" 2
           ( while sleep 300; do
               P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/compile.log" 2>/dev/null | tail -1)
