@@ -10,7 +10,7 @@ on:
     inputs:
       build:
         description: 私有仓库 release 名（mac-build-N）
-        default: mac-build-15
+        default: mac-build-21
 
 permissions:
   contents: read

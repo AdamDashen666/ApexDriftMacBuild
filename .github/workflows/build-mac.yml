@@ -339,11 +339,20 @@ jobs:
 
       # 存缓存前先腾内存（UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB），再卸下缓存映像
       - name: Free memory before saving cache
+        id: freemem
         if: always() && steps.build.outcome != 'skipped'
-        run: bash .github/scripts/cache-img.sh unmount
+        run: |
+          bash .github/scripts/cache-img.sh unmount
+          # 编译几乎没进展时（第 20 次 .NET 工具没起来）映像近乎是空的；存下来会成为“最新缓存”，下次恢复反而丢掉之前的进度
+          for n in build tools; do
+            KB=$(du -sk "bcache/${n}.sparseimage" 2>/dev/null | cut -f1)
+            if [ "${n}" = build ]; then MIN=1048576; else MIN=102400; fi
+            if [ "${KB:-0}" -ge "${MIN}" ]; then echo "save_${n}=true" >> "$GITHUB_OUTPUT"
+            else echo "::warning::${n} 映像只有 ${KB:-0} KB，不存缓存"; fi
+          done
 
       - name: Save build cache
-        if: always() && steps.build.outcome != 'skipped'
+        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_build == 'true'
         continue-on-error: true
         timeout-minutes: 20
         uses: actions/cache/save@v4
@@ -354,7 +363,7 @@ jobs:
           key: ue-mac-img-${{ env.UE_REF }}-${{ github.run_id }}
 
       - name: Save engine tools cache
-        if: always() && steps.build.outcome != 'skipped'
+        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_tools == 'true'
         continue-on-error: true
         timeout-minutes: 15
         uses: actions/cache/save@v4
