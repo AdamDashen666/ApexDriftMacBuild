@@ -3,7 +3,8 @@ name: Build Mac
 # 手动触发。公开仓库只为用免费的 Mac 构建机；UE 引擎源码只在构建机上临时拉取，不进仓库、不进公开日志。
 # 流程：拉 UE 源码（只下 Mac 依赖）→ 只编 ApexDrift 游戏程序（Shipping、Apple 芯片）→
 # 用 Windows 上烘焙好的内容（私有仓库 release cooked-mac）打包 → 临时签名 → dmg 和详细日志发到私有仓库 release。
-# 编译中间文件存 Actions 缓存：先只编译不链接、编完存一次（链接时构建机最容易失联），打包后再存一次；没编完下次接着编。
+# 编译中间文件存 Actions 缓存：先只编译不链接、编完存一次（链接时构建机最容易失联；从头编时不存），补编剩下的，
+# 再由 UAT 链接打包；dmg 传到私有仓库以后才存最后一次缓存。没编完下次接着编。
 # 辅助脚本在 .github/scripts：cache-img.sh（挂载 / 卸下缓存映像）、ubt-config.sh（UBT 配置）、upload-logs.sh（日志传私有仓库）
 on:
   workflow_dispatch:
@@ -79,12 +80,16 @@ jobs:
             gh release create heartbeat -R "$PRIVATE_REPO" --prerelease --title "构建机心跳" --notes "每次 Mac 构建的状态记录，构建机失联时看最后一次。" >/dev/null 2>&1 || true
           HB="$OUT/logs/heartbeat-${{ github.run_number }}.txt"
           nohup bash -c 'while true; do
-              L=$(ls -t "$OUT"/logs/compile.log "$OUT"/logs/uat.log 2>/dev/null | head -1)
+              L=$(ls -t "$OUT"/logs/compile.log "$OUT"/logs/compile2.log "$OUT"/logs/uat.log 2>/dev/null | head -1)
               { date; uptime; memory_pressure 2>/dev/null | tail -1; sysctl vm.swapusage; df -h /System/Volumes/Data | tail -1
+                vm_stat | grep -E "Pages (free|active|inactive|wired down|occupied by compressor)"
                 echo; echo "进程 $(ps -ax | wc -l | tr -d " ") 个，线程 $(ps -axM | wc -l | tr -d " ") 个"
                 echo "占内存最多（KB）："; ps -axo rss=,pcpu=,comm= | sort -rn | head -10
                 echo "占 CPU 最多（%）："; ps -axo pcpu=,rss=,comm= | sort -rn | head -8
-                echo; echo "${L##*/}"; grep -a -o -E "^\[[0-9]+/[0-9]+\]" "$L" 2>/dev/null | tail -1; tail -n 3 "$L" 2>/dev/null
+                # 第 24、25 次失联前：负载 4 却没有编译器在跑、diskutil 占 CPU 最多，像是磁盘读写卡住；记下卡在内核里的进程和谁在调 diskutil
+                echo "不可中断等待（U）的进程："; ps -axo stat=,pid=,ppid=,etime=,comm= | grep -E "^ *U" | head -15
+                echo "diskutil 和它的父进程："; for p in $(pgrep -x diskutil); do ps -o pid=,etime=,command= -p "$p" | cut -c1-160; ps -o pid=,etime=,command= -p "$(ps -o ppid= -p "$p" | tr -d " ")" | cut -c1-160; done
+                echo; echo "${L##*/}"; grep -a -o -E "^\[[0-9]+/[0-9]+\]" "$L" 2>/dev/null | tail -1; tail -n 5 "$L" 2>/dev/null
                 echo; echo "最近的报错行："; grep -a -E "error|Error|ERROR|failed|Failed|FAILED" "$L" 2>/dev/null | tail -n 25; } > "$0" 2>&1
               echo "$(date +%H:%M:%S) $(sysctl -n vm.loadavg) $(memory_pressure 2>/dev/null | tail -1 | grep -o -E "[0-9]+%") 线程$(ps -axM | wc -l | tr -d " ") ${L##*/} $(grep -a -o -E "^\[[0-9]+/[0-9]+\]" "$L" 2>/dev/null | tail -1)" >> "$OUT/logs/heartbeat-history.txt"
               perl -e "alarm 45; exec @ARGV" gh release upload heartbeat -R "$1" "$0" --clobber >/dev/null 2>&1
@@ -224,6 +229,7 @@ jobs:
           grep -o -E "[A-Za-z0-9_./-]+\.(cpp|h|mm|cs):[0-9]+(:[0-9]+)?: (fatal )?error" "$OUT/logs/compile.log" | sort -u | head -20
           # 记下链接器版本和线程相关选项（man ld），以后要限制链接并行度时参考
           { echo "== ld -v"; ld -v 2>&1; echo "== man ld：thread"; man ld 2>/dev/null | col -b | grep -i -B2 -A4 thread | head -80; } > "$OUT/logs/ld-info.txt" 2>&1
+          bash "$GITHUB_WORKSPACE/.github/scripts/obj-check.sh" 编译后
           exit $CODE
 
       - name: Upload compile logs
@@ -234,11 +240,14 @@ jobs:
         run: bash .github/scripts/upload-logs.sh compile-logs
 
       # 中途存档：编译跑了 15 分钟以上才存（有缓存时只编几步，不用多存一次）；编译失败或超时也存，下次接着编
+      # 从头编（fresh）时不存：M1 上恢复缓存一直出错，存了也用不上；而第 24、25 次存档时卸下再挂回映像以后，
+      # 打包阶段 UAT 又重编了几十个模块，编到快结束时构建机失联（第 21 次同样流程打包时只剩链接）
       - name: "Checkpoint: unmount cache images"
         id: ck
         if: always() && steps.compile.outcome != 'skipped'
         continue-on-error: true
         run: |
+          if [ "${{ inputs.fresh }}" = true ]; then echo "从头编：中途不存缓存，映像一直挂着"; echo "save=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           T0=$(cat "$RUNNER_TEMP/compile_t0" 2>/dev/null || date +%s)
           MIN=$(( ($(date +%s) - T0) / 60 ))
           if [ $MIN -lt 15 ]; then echo "编译只用了 ${MIN} 分钟，这里不存缓存"; echo "save=false" >> "$GITHUB_OUTPUT"; exit 0; fi
@@ -270,6 +279,29 @@ jobs:
       - name: Remount cache images
         if: always() && steps.ck.outputs.save == 'true'
         run: bash .github/scripts/cache-img.sh mount
+
+      # 补编：同一条 UBT 不链接命令再跑一次。编译步骤成功时通常一两分钟就确认全是最新的；
+      # 有过期或 0 字节的 .o 就在这里编掉（并行 2 个），打包时 UAT 只剩链接
+      - name: Compile leftovers (no link)
+        if: always() && steps.compile.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 120
+        run: |
+          cd "$UE"
+          T0=$(date +%s)
+          set +e
+          bash "$GITHUB_WORKSPACE/.github/scripts/obj-check.sh" 补编前
+          bash "$GITHUB_WORKSPACE/.github/scripts/ubt-config.sh" 2
+          nice -n 10 ./Engine/Build/BatchFiles/RunUBT.sh \
+            -Target="UnrealPak Mac Development -Project=$PROJ/ApexDrift.uproject -NoLink" \
+            -Target="ApexDrift Mac Shipping -Project=$PROJ/ApexDrift.uproject -remoteini=\"$PROJ\" -DisableAdaptiveUnity -skipdeploy -NoLink" \
+            > "$OUT/logs/compile2.log" 2>&1
+          CODE=$?
+          echo "补编退出码 ${CODE}，用时 $(( ($(date +%s) - T0) / 60 )) 分钟"
+          grep -c -E "\] Compile " "$OUT/logs/compile2.log" | sed 's/^/补编步骤数 /' || true
+          grep -E "Result: |Total time in|Target is up to date" "$OUT/logs/compile2.log" | tail -5
+          grep -o -E "[A-Za-z0-9_./-]+\.(cpp|h|mm|cs):[0-9]+(:[0-9]+)?: (fatal )?error" "$OUT/logs/compile2.log" | sort -u | head -20
+          exit $CODE
 
       # 编译已在上一步完成时这里只剩链接和打包；没编完（失败、超时）就接着编
       - name: Build, stage, package
@@ -333,48 +365,16 @@ jobs:
       # 编译一结束就把详细日志传到私有仓库：后面存缓存时构建机如果卡死失联，作业日志会整个丢掉
       - name: Upload build logs early
         if: always() && steps.build.outcome != 'skipped'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.UE_SOURCE_TOKEN }}
         run: bash .github/scripts/upload-logs.sh build-logs
 
-      # 存缓存前先腾内存（UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB），再卸下缓存映像
-      - name: Free memory before saving cache
-        id: freemem
-        if: always() && steps.build.outcome != 'skipped'
-        run: |
-          bash .github/scripts/cache-img.sh unmount
-          # 编译几乎没进展时（第 20 次 .NET 工具没起来）映像近乎是空的；存下来会成为“最新缓存”，下次恢复反而丢掉之前的进度
-          for n in build tools; do
-            KB=$(du -sk "bcache/${n}.sparseimage" 2>/dev/null | cut -f1)
-            if [ "${n}" = build ]; then MIN=1048576; else MIN=102400; fi
-            if [ "${KB:-0}" -ge "${MIN}" ]; then echo "save_${n}=true" >> "$GITHUB_OUTPUT"
-            else echo "::warning::${n} 映像只有 ${KB:-0} KB，不存缓存"; fi
-          done
-
-      - name: Save build cache
-        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_build == 'true'
-        continue-on-error: true
-        timeout-minutes: 20
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            bcache/build.sparseimage
-            project/Binaries
-          key: ue-mac-img-${{ env.UE_REF }}-${{ github.run_id }}
-
-      - name: Save engine tools cache
-        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_tools == 'true'
-        continue-on-error: true
-        timeout-minutes: 15
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            bcache/tools.sparseimage
-            UnrealEngine/Engine/Binaries/Mac
-          key: ue-mac-tools-img-${{ env.UE_REF }}-${{ github.run_id }}
-
+      # 先出 dmg、传到私有仓库，最后才存缓存：存缓存时构建机失联过，不能让它连累成品
       - name: Sign and make dmg
         run: |
+          # UAT 留下的 .NET 常驻进程还占着内存，冒烟测试前先结束
+          pkill -f "UnrealEngine/Engine/Binaries/ThirdParty/DotNet" || true
           SRC=$(find "$OUT/archive" -maxdepth 3 -name "*.app" | head -1)
           [ -n "$SRC" ] || { echo "::error::没找到打包出的 .app"; find "$OUT/archive" -maxdepth 3; exit 1; }
           STAGE="$RUNNER_TEMP/dmg"; mkdir -p "$STAGE"
@@ -419,3 +419,39 @@ jobs:
         run: |
           bash .github/scripts/upload-logs.sh logs $(ls "$OUT"/ApexDrift-mac.dmg 2>/dev/null)
           echo "已发到私有仓库 release mac-build-${{ github.run_number }}"
+
+      # 存缓存前先腾内存（UBT / MSBuild 常驻进程和 xcodebuild 还占着几百 MB 到 GB），再卸下缓存映像
+      - name: Free memory before saving cache
+        id: freemem
+        if: always() && steps.build.outcome != 'skipped'
+        run: |
+          bash .github/scripts/cache-img.sh unmount
+          # 编译几乎没进展时（第 20 次 .NET 工具没起来）映像近乎是空的；存下来会成为“最新缓存”，下次恢复反而丢掉之前的进度
+          for n in build tools; do
+            KB=$(du -sk "bcache/${n}.sparseimage" 2>/dev/null | cut -f1)
+            if [ "${n}" = build ]; then MIN=1048576; else MIN=102400; fi
+            if [ "${KB:-0}" -ge "${MIN}" ]; then echo "save_${n}=true" >> "$GITHUB_OUTPUT"
+            else echo "::warning::${n} 映像只有 ${KB:-0} KB，不存缓存"; fi
+          done
+
+      - name: Save build cache
+        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_build == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            bcache/build.sparseimage
+            project/Binaries
+          key: ue-mac-img-${{ env.UE_REF }}-${{ github.run_id }}
+
+      - name: Save engine tools cache
+        if: always() && steps.build.outcome != 'skipped' && steps.freemem.outputs.save_tools == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            bcache/tools.sparseimage
+            UnrealEngine/Engine/Binaries/Mac
+          key: ue-mac-tools-img-${{ env.UE_REF }}-${{ github.run_id }}
