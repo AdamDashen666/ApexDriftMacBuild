@@ -164,8 +164,10 @@ jobs:
       # 没有缓存就新建空的稀疏映像（实际只占用写进去的部分）
       - name: Mount cache images
         run: |
-          if [ "${{ steps.restore_build.outcome }}" != success ]; then echo "::warning::恢复编译缓存失败，这部分从头编"; rm -rf bcache/build.sparseimage project/Binaries; fi
-          if [ "${{ steps.restore_tools.outcome }}" != success ]; then echo "::warning::恢复工具缓存失败，这部分从头编"; rm -rf bcache/tools.sparseimage UnrealEngine/Engine/Binaries/Mac; fi
+          [ "${{ inputs.fresh }}" = true ] && echo "从头编：不恢复编译缓存"
+          if [ "${{ steps.restore_build.outcome }}" = failure ]; then echo "::warning::恢复编译缓存失败，这部分从头编"; rm -rf bcache/build.sparseimage project/Binaries; fi
+          # Engine/Binaries/Mac 里有依赖脚本下好的 UBA 等程序，不能整个删（第 20 次删了它，UBT 报 “UBA is not available”）；只丢掉映像
+          if [ "${{ steps.restore_tools.outcome }}" = failure ]; then echo "::warning::恢复工具缓存失败，这部分从头编"; rm -f bcache/tools.sparseimage; fi
           bash .github/scripts/cache-img.sh mount
 
       # 先只编译不链接（UBT 的 -NoLink），编完马上存一次缓存。第 4、12、14 次构建都在最后链接游戏主程序时失联
