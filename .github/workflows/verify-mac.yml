@@ -67,13 +67,13 @@ jobs:
           find ~/Library -path "*ApexDrift*" -name "mac_race*" -type f 2>/dev/null | while read f; do cp "$f" "$OUT/verify/"; done
           cat "$OUT"/verify/mac_race_race.txt 2>/dev/null || echo "::warning::没有三圈完赛结果（程序太旧，或没跑完）"
 
-      # 拟真档（轮胎物理，v2.8 调过牵引力控制）：平地 14 个“键盘玩家平时开车”场景（牵引力控制开），
-      # 再跑关掉牵引力控制的物理场景（直线加速、甩尾、倒着滑、原地转圈）。和 Windows 的 ship_grip / ship_sim 对照
+      # 拟真档（轮胎物理，v2.8 调过牵引力控制，v2.9 拉手刹起漂后不限油门）：平地 14 个“键盘玩家平时开车”场景（牵引力控制开），
+      # 再跑物理场景（直线加速、甩尾、倒着滑、油门续漂、原地转圈），牵引力控制关一遍、开一遍。和 Windows 的 win30_* 对照
       - name: Sim handling scenarios (no rendering)
         continue-on-error: true
         run: |
-          for t in grip sim; do
-            if [ "$t" = grip ]; then A="-ApexBenchGrip"; else A="-ApexBenchSim -ApexSimNoTCS"; fi
+          for t in grip sim simtcs; do
+            case "$t" in grip) A="-ApexBenchGrip" ;; sim) A="-ApexBenchSim -ApexSimNoTCS" ;; *) A="-ApexBenchSim -ApexSimTCS" ;; esac
             T0=$(date +%s)
             "$BIN" -nullrhi -unattended -UseFixedTimeStep -ApexBench -ApexBenchPad ${A} -ApexAssist=2 -ApexAuto -ApexBenchNoUI -ApexBenchLabel=mac_${t} > "$OUT/verify/run_${t}.log" 2>&1 &
             P=$!
