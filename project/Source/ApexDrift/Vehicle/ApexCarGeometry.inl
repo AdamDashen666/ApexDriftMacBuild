@@ -12,79 +12,76 @@
 			G.HoodCam = FVector(128.00f, 0.00f, 98.00f); G.BumperCam = FVector(244.00f, 0.00f, 44.00f);
 			G.Length = 455.0f; G.Width = 202.0f; G.Height = 108.4f;
 		}
-		if (Id == FName(TEXT("Ember")))
+		if (Id == FName(TEXT("Agunta")))
 		{
-			G.Wheel[0] = FVector(121.57f, -80.94f, 39.84f);
-			G.Wheel[1] = FVector(121.57f, 80.94f, 39.84f);
-			G.Wheel[2] = FVector(-121.57f, -73.54f, 39.84f);
-			G.Wheel[3] = FVector(-121.57f, 73.54f, 39.84f);
-			G.RadiusF = 39.84f; G.RadiusR = 39.84f; G.WidthF = 27.83f; G.WidthR = 27.83f;
-			G.Headlight = FVector(170.62f, 53.29f, 70.56f); G.Taillight = FVector(-191.89f, 45.05f, 38.52f);
-			G.HoodCam = FVector(105.00f, -0.00f, 109.00f); G.BumperCam = FVector(247.06f, -0.00f, 40.00f);
-			G.Length = 450.9f; G.Width = 193.9f; G.Height = 100.2f;
+			G.Wheel[0] = FVector(142.44f, -86.97f, 33.27f);
+			G.Wheel[1] = FVector(142.44f, 86.97f, 33.27f);
+			G.Wheel[2] = FVector(-142.44f, -86.97f, 33.27f);
+			G.Wheel[3] = FVector(-142.44f, 86.97f, 33.27f);
+			G.RadiusF = 33.25f; G.RadiusR = 33.25f; G.WidthF = 25.46f; G.WidthR = 25.46f;
+			G.Headlight = FVector(214.53f, 68.82f, 45.85f); G.Taillight = FVector(-200.53f, 66.31f, 72.44f);
+			G.HoodCam = FVector(125.07f, -0.00f, 97.71f); G.BumperCam = FVector(240.88f, -0.00f, 40.00f);
+			G.Length = 460.0f; G.Width = 203.5f; G.Height = 113.1f;
 		}
-		if (Id == FName(TEXT("Ironclad")))
+		if (Id == FName(TEXT("Boreas")))
 		{
-			G.Wheel[0] = FVector(151.55f, -82.49f, 36.19f);
-			G.Wheel[1] = FVector(151.55f, 82.49f, 36.19f);
-			G.Wheel[2] = FVector(-151.55f, -88.47f, 36.19f);
-			G.Wheel[3] = FVector(-151.55f, 88.47f, 36.19f);
-			G.RadiusF = 36.19f; G.RadiusR = 36.19f; G.WidthF = 34.34f; G.WidthR = 42.02f;
-			G.Headlight = FVector(214.26f, 66.95f, 68.77f); G.Taillight = FVector(-240.36f, 63.07f, 72.35f);
-			G.Exhausts.Add(FVector(-236.48f, -54.31f, 29.88f));
-			G.Exhausts.Add(FVector(-236.48f, 54.31f, 29.88f));
-			G.HoodCam = FVector(85.00f, -0.00f, 132.00f); G.BumperCam = FVector(228.57f, -0.00f, 40.00f);
-			G.Length = 475.0f; G.Width = 215.4f; G.Height = 124.8f;
+			G.Wheel[0] = FVector(114.58f, -73.80f, 30.33f);
+			G.Wheel[1] = FVector(114.58f, 73.80f, 30.33f);
+			G.Wheel[2] = FVector(-114.58f, -73.80f, 30.33f);
+			G.Wheel[3] = FVector(-114.58f, 73.80f, 30.33f);
+			G.RadiusF = 30.33f; G.RadiusR = 30.33f; G.WidthF = 38.18f; G.WidthR = 38.18f;
+			G.Headlight = FVector(207.28f, 41.16f, 55.45f); G.Taillight = FVector(-196.51f, 75.88f, 73.95f);
+			G.HoodCam = FVector(80.00f, -0.00f, 112.00f); G.BumperCam = FVector(223.64f, -0.00f, 40.00f);
+			G.Length = 424.0f; G.Width = 194.3f; G.Height = 126.2f;
 		}
-		if (Id == FName(TEXT("Onyx")))
+		if (Id == FName(TEXT("Falco")))
 		{
-			G.Wheel[0] = FVector(132.77f, -84.40f, 43.89f);
-			G.Wheel[1] = FVector(132.77f, 84.40f, 43.89f);
-			G.Wheel[2] = FVector(-132.77f, -84.40f, 43.89f);
-			G.Wheel[3] = FVector(-132.77f, 84.40f, 43.89f);
-			G.RadiusF = 43.89f; G.RadiusR = 43.89f; G.WidthF = 30.66f; G.WidthR = 30.66f;
-			G.Headlight = FVector(181.73f, 54.10f, 83.98f); G.Taillight = FVector(-188.01f, 60.10f, 99.27f);
-			G.Exhausts.Add(FVector(-200.85f, -44.62f, 18.80f));
-			G.Exhausts.Add(FVector(-200.85f, 44.62f, 18.80f));
-			G.HoodCam = FVector(114.00f, -0.00f, 117.00f); G.BumperCam = FVector(225.22f, -0.00f, 40.00f);
-			G.Length = 436.5f; G.Width = 202.2f; G.Height = 120.4f;
+			G.Wheel[0] = FVector(122.98f, -69.53f, 29.40f);
+			G.Wheel[1] = FVector(122.98f, 69.53f, 29.40f);
+			G.Wheel[2] = FVector(-122.98f, -69.53f, 29.37f);
+			G.Wheel[3] = FVector(-122.98f, 69.53f, 29.37f);
+			G.RadiusF = 29.40f; G.RadiusR = 29.37f; G.WidthF = 24.01f; G.WidthR = 23.99f;
+			G.Headlight = FVector(188.82f, 58.42f, 65.00f); G.Taillight = FVector(-177.09f, 64.48f, 70.39f);
+			G.Exhausts.Add(FVector(-180.62f, -54.16f, 30.65f));
+			G.HoodCam = FVector(115.00f, -0.00f, 98.20f); G.BumperCam = FVector(207.72f, -0.00f, 40.00f);
+			G.Length = 389.5f; G.Width = 170.0f; G.Height = 161.7f;
 		}
-		if (Id == FName(TEXT("Rustbelt")))
+		if (Id == FName(TEXT("Goblin")))
 		{
-			G.Wheel[0] = FVector(139.40f, -80.25f, 35.59f);
-			G.Wheel[1] = FVector(139.40f, 80.25f, 35.59f);
-			G.Wheel[2] = FVector(-139.40f, -88.94f, 47.29f);
-			G.Wheel[3] = FVector(-139.40f, 88.94f, 47.29f);
-			G.RadiusF = 35.59f; G.RadiusR = 47.29f; G.WidthF = 24.54f; G.WidthR = 38.45f;
-			G.Headlight = FVector(186.83f, 47.53f, 57.78f); G.Taillight = FVector(-226.32f, 76.66f, 50.88f);
-			G.Exhausts.Add(FVector(64.49f, -75.07f, 69.34f));
-			G.Exhausts.Add(FVector(51.68f, -68.44f, 72.05f));
-			G.Exhausts.Add(FVector(51.68f, 69.59f, 71.85f));
-			G.Exhausts.Add(FVector(64.49f, 76.22f, 69.13f));
-			G.HoodCam = FVector(116.00f, -0.00f, 142.00f); G.BumperCam = FVector(196.78f, -0.00f, 40.00f);
-			G.Length = 420.4f; G.Width = 179.3f; G.Height = 147.8f;
+			G.Wheel[0] = FVector(130.19f, -78.07f, 33.90f);
+			G.Wheel[1] = FVector(130.19f, 78.07f, 33.90f);
+			G.Wheel[2] = FVector(-130.19f, -89.67f, 35.78f);
+			G.Wheel[3] = FVector(-130.19f, 89.67f, 35.78f);
+			G.RadiusF = 33.89f; G.RadiusR = 35.76f; G.WidthF = 34.44f; G.WidthR = 36.34f;
+			G.Headlight = FVector(212.70f, 46.91f, 47.39f); G.Taillight = FVector(-195.30f, 60.06f, 72.79f);
+			G.Exhausts.Add(FVector(-210.39f, -24.76f, 62.53f));
+			G.Exhausts.Add(FVector(-210.77f, 24.78f, 62.53f));
+			G.HoodCam = FVector(121.46f, -0.00f, 95.48f); G.BumperCam = FVector(242.35f, -0.00f, 40.00f);
+			G.Length = 455.1f; G.Width = 215.7f; G.Height = 110.9f;
 		}
-		if (Id == FName(TEXT("Selva")))
+		if (Id == FName(TEXT("Kestrel")))
 		{
-			G.Wheel[0] = FVector(138.59f, -86.22f, 34.61f);
-			G.Wheel[1] = FVector(138.59f, 86.22f, 34.61f);
-			G.Wheel[2] = FVector(-138.59f, -87.29f, 36.26f);
-			G.Wheel[3] = FVector(-138.59f, 87.29f, 36.26f);
-			G.RadiusF = 34.61f; G.RadiusR = 36.26f; G.WidthF = 28.02f; G.WidthR = 33.91f;
-			G.Headlight = FVector(195.51f, 79.68f, 31.40f); G.Taillight = FVector(-203.06f, 61.55f, 76.51f);
-			G.Exhausts.Add(FVector(-201.05f, -49.41f, 34.86f));
-			G.Exhausts.Add(FVector(-201.05f, 49.41f, 34.86f));
-			G.HoodCam = FVector(128.00f, -0.00f, 88.00f); G.BumperCam = FVector(236.20f, -0.00f, 40.00f);
-			G.Length = 447.4f; G.Width = 207.3f; G.Height = 116.2f;
+			G.Wheel[0] = FVector(115.66f, -70.03f, 27.12f);
+			G.Wheel[1] = FVector(115.66f, 70.03f, 27.12f);
+			G.Wheel[2] = FVector(-115.66f, -73.19f, 31.93f);
+			G.Wheel[3] = FVector(-115.66f, 73.19f, 31.93f);
+			G.RadiusF = 27.12f; G.RadiusR = 31.93f; G.WidthF = 30.43f; G.WidthR = 34.61f;
+			G.Headlight = FVector(183.61f, 58.81f, 33.38f); G.Taillight = FVector(-191.45f, 52.78f, 49.32f);
+			G.Exhausts.Add(FVector(-10.00f, -85.00f, 10.00f));
+			G.Exhausts.Add(FVector(-10.00f, 85.00f, 10.00f));
+			G.HoodCam = FVector(85.50f, -0.00f, 82.80f); G.BumperCam = FVector(225.97f, -0.00f, 40.00f);
+			G.Length = 460.0f; G.Width = 185.9f; G.Height = 102.3f;
 		}
-		if (Id == FName(TEXT("Vela")))
+		if (Id == FName(TEXT("Saetta")))
 		{
-			G.Wheel[0] = FVector(135.74f, -93.31f, 37.25f);
-			G.Wheel[1] = FVector(135.74f, 93.31f, 37.25f);
-			G.Wheel[2] = FVector(-135.74f, -94.58f, 37.25f);
-			G.Wheel[3] = FVector(-135.74f, 94.58f, 37.25f);
-			G.RadiusF = 37.23f; G.RadiusR = 37.23f; G.WidthF = 27.92f; G.WidthR = 27.92f;
-			G.Headlight = FVector(202.54f, 62.77f, 63.16f); G.Taillight = FVector(-161.73f, 46.44f, 93.51f);
-			G.HoodCam = FVector(116.00f, -0.00f, 106.00f); G.BumperCam = FVector(231.19f, -0.00f, 40.00f);
-			G.Length = 422.7f; G.Width = 226.9f; G.Height = 102.8f;
+			G.Wheel[0] = FVector(105.80f, -73.21f, 29.68f);
+			G.Wheel[1] = FVector(105.80f, 73.21f, 29.68f);
+			G.Wheel[2] = FVector(-105.80f, -74.10f, 29.68f);
+			G.Wheel[3] = FVector(-105.80f, 74.10f, 29.68f);
+			G.RadiusF = 29.68f; G.RadiusR = 29.68f; G.WidthF = 17.59f; G.WidthR = 29.13f;
+			G.Headlight = FVector(173.04f, 53.33f, 58.89f); G.Taillight = FVector(-171.02f, 62.88f, 61.83f);
+			G.Exhausts.Add(FVector(-173.15f, -33.84f, 25.32f));
+			G.Exhausts.Add(FVector(-173.15f, 34.13f, 25.32f));
+			G.HoodCam = FVector(105.00f, -0.00f, 83.10f); G.BumperCam = FVector(194.52f, -0.00f, 40.00f);
+			G.Length = 371.0f; G.Width = 180.8f; G.Height = 126.0f;
 		}

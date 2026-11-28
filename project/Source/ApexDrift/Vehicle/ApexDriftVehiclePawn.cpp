@@ -531,7 +531,18 @@ void AApexDriftVehiclePawn::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (USkeletalMeshComponent* M = GetMesh()) M->SetUseCCD(true);   // 300km/h 撞护墙不穿模
+	if (USkeletalMeshComponent* M = GetMesh())
+	{
+		M->SetUseCCD(true);   // 300km/h 撞护墙不穿模
+		// 车身碰撞低摩擦（轮胎抓地由 Chaos 轮子单独算，不受影响）：冲跳台折角、落地压到底蹭地时不再被拽停。
+		// 实测 14° 跳台落地 141→105km/h，摩擦 0.05 时 160→150
+		BodyPhysMat = NewObject<UPhysicalMaterial>(this);
+		BodyPhysMat->Friction = 0.1f;
+		BodyPhysMat->StaticFriction = 0.1f;
+		BodyPhysMat->bOverrideFrictionCombineMode = true;
+		BodyPhysMat->FrictionCombineMode = EFrictionCombineMode::Min;
+		M->SetPhysMaterialOverride(BodyPhysMat);
+	}
 	PrevWheelContacts.Init(FVector::ZeroVector, 4);
 	PrevWheelSkidding.Init(false, 4);
 
@@ -1218,7 +1229,17 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 		return;
 	}
 
-	Body->SetAngularDamping(bGrounded ? 0.05f : 2.6f);
+	// 空中：只压俯仰 / 侧倾（落地是正的），左右转动保留惯性，带着甩尾、转圈起跳，空中照样转。
+	// 以前整体角阻尼 2.6，空中的转动 0.4 秒就被吃掉，像在空中停住了
+	Body->SetAngularDamping(0.05f);
+	if (!bGrounded)
+	{
+		FVector Av = Body->GetPhysicsAngularVelocityInDegrees();
+		const FVector UpV = GetActorUpVector();
+		const FVector YawPart = UpV * FVector::DotProduct(Av, UpV);
+		Av = YawPart + (Av - YawPart) * FMath::Exp(-2.6f * Dt);
+		Body->SetPhysicsAngularVelocityInDegrees(Av);
+	}
 	WallAssistTimer = FMath::Max(0.0f, WallAssistTimer - Dt);
 	ExitAssistTimer = FMath::Max(0.0f, ExitAssistTimer - Dt);
 
@@ -1263,6 +1284,17 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	const bool bPro = (HandlingAssist == EApexHandlingAssist::DriftPro);
 	const bool bSimRaw = (HandlingAssist == EApexHandlingAssist::SimulationRaw);
 
+	// 车身很陡（翻滚环、墙骑弯、半管上沿）：下面的辅助都按水平面的行进方向算，这时会把车拧歪，交给 Chaos 自己跑
+	if (bGrounded && GetActorUpVector().Z < 0.55f)
+	{
+		EndDrift();
+		bSimFree = false;
+		TangentAssist = 0.0f;
+		bPrevVelYawValid = false;
+		SetAllWheelGrip(3.4f, 3.9f);
+		Move->SetSteeringInput(FMath::Clamp(SmoothedSteer * 0.5f, -1.0f, 1.0f));
+		return;
+	}
 	if (bSimRaw && ApexSim::Tune().bTireModel)
 	{
 		// 对比用（-ApexSimTire）：v2.6–v2.9 的轮胎模型，不进下面的漂移状态机、车身稳定和“倒着走就拧回来”
@@ -1567,7 +1599,7 @@ bool AApexDriftVehiclePawn::BeginAutoRun()
 void AApexDriftVehiclePawn::EndAutoRun()
 {
 	AutoRun.Stop();
-	if (GetMesh()) GetMesh()->SetPhysMaterialOverride(nullptr);
+	if (GetMesh()) GetMesh()->SetPhysMaterialOverride(BodyPhysMat);
 	EndDrift();
 	ExitAssistTimer = 0.55f;
 	bSimFree = false;
@@ -1646,7 +1678,9 @@ bool AApexDriftVehiclePawn::UpdateSimSlide(float Dt, float SpeedKmh, bool bGroun
 		SimSpin -= FMath::Sign(SimSpin) * 360.0f;
 		if (DriftScoreComp) DriftScoreComp->AwardSpin();
 	}
-	if (bCaught || SpeedKmh < 12.0f || SimAirT > 0.35f)
+	// 离地不再结束滑动（以前 0.35 秒就结束，落地被抓地态一把扶正）：带着角度起跳，落地接着滑；
+	// 空中只保留惯性，不加力矩。飞太久（翻车、掉下去）才放弃
+	if (bCaught || SpeedKmh < 12.0f || SimAirT > 4.0f)
 	{
 		bSimFree = false;
 		SimRate = 0.0f;
@@ -1655,6 +1689,7 @@ bool AApexDriftVehiclePawn::UpdateSimSlide(float Dt, float SpeedKmh, bool bGroun
 	}
 	if (!bGrounded)
 	{
+		SimRate = FMath::Clamp(YawRate - PathRateDeg, -345.0f, 345.0f);   // 落地时从空中的实际转速接着算
 		return true;
 	}
 

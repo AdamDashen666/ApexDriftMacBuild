@@ -960,6 +960,10 @@ void UApexBenchSubsystem::DriveRamps(float DeltaTime)
 		{ TEXT("超级跳台200"), -260, -265, 0, 200, 8.0f, 0 }, { TEXT("超级跳台150"), -260, -265, 0, 150, 8.0f, 0 }, { TEXT("金字塔"), -112, -170, 90, 90, 5.0f, 0 }, { TEXT("立交桥"), 78, -110, 90, 100, 6.0f, 0 },
 		{ TEXT("半管斜冲"), -110, -196, 9, 100, 5.0f, 0 }, { TEXT("贴墙弯"), 190, -190, 35, 110, 5.0f, 0.45f }, { TEXT("碗池贴边"), -90, -190, 180, 80, 9.0f, 0.0f }, { TEXT("横坡"), 200, -262, 0, 110, 5.0f, 0 }, { TEXT("土包场"), 150, -60, 0, 80, 5.0f, 0 }, { TEXT("螺旋塔"), 60, -178, 0, 60, 22.0f, 0 },
 		{ TEXT("撞木箱墙"), 60, -10, 0, 140, 4.5f, 0 }, { TEXT("撞泡沫墙"), 100, 28, 0, 140, 4.5f, 0 }, { TEXT("撞油桶"), 92, 52, 0, 110, 4.0f, 0 }, { TEXT("打保龄球瓶"), 60, 0, 0, 170, 5.0f, 0 }, { TEXT("绕桩直冲"), -290, -14, 0, 130, 5.0f, 0 },
+		// 游乐场扩建（2026-11-28，坐标见 Tools/playground_ext.py）
+		{ TEXT("翻滚环"), -18.5f, 1127, 9.8f, 120, 7.0f, 0 }, { TEXT("巨跳12"), 560, -1250, 0, 160, 16.0f, 0 }, { TEXT("巨跳34"), 560, -890, 0, 200, 18.0f, 0 },
+		{ TEXT("高台42"), 520, 1300, 0, 180, 16.0f, 0 }, { TEXT("长半管"), -450, 1290, 0, 100, 6.0f, 0 }, { TEXT("墙骑弯"), 308, 901, 63, 110, 8.0f, 0 },
+		{ TEXT("大碗池"), 1200, 760, 90, 90, 13.0f, 0 }, { TEXT("越野环"), -400, -650, 83, 90, 8.0f, 0 },
 	};
 	AApexDriftPlayerController* PC = Cast<AApexDriftPlayerController>(GetWorld()->GetFirstPlayerController());
 	AApexDriftVehiclePawn* Car = PC ? PC->GetVehiclePawn() : nullptr;
@@ -1003,6 +1007,14 @@ void UApexBenchSubsystem::DriveRamps(float DeltaTime)
 			const bool bOut = P.Z > 1690.0f && D.Y > 2000.0f;
 			Steer = FMath::Clamp(FMath::FindDeltaAngleDegrees(Car->GetActorRotation().Yaw, bOut ? 180.0f : Want) / 12.0f + (bOut ? 0.0f : 0.35f), -1.0f, 1.0f);
 		}
+	}
+	else if (FCString::Strcmp(C.Name, TEXT("墙骑弯")) == 0 && KeySegT > 1.2f)
+	{
+		// 绕墙骑弯圆心（260,960）半径 70m 逆时针开
+		const FVector2D D = FVector2D(P.X, P.Y) - FVector2D(26000.0f, 96000.0f);
+		const FVector2D Tan = FVector2D(-D.Y, D.X).GetSafeNormal();
+		const float Want = FMath::RadiansToDegrees(FMath::Atan2(Tan.Y, Tan.X)) + FMath::Clamp((D.Size() - 7000.0f) * 0.04f, -25.0f, 25.0f);
+		Steer = FMath::Clamp(FMath::FindDeltaAngleDegrees(Car->GetActorRotation().Yaw, Want) / 12.0f + 0.25f, -1.0f, 1.0f);
 	}
 	else if (FCString::Strcmp(C.Name, TEXT("碗池贴边")) == 0 && P.X < -17000.0f)
 	{

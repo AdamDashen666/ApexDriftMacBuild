@@ -201,6 +201,9 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> BodyPaintMID;
 	UPROPERTY()
 	TObjectPtr<class UPhysicalMaterial> AutoPhysMat;
+	/** 车身（底盘、保险杠）的碰撞材质：低摩擦。默认材质下冲跳台折角、落地压到底时底盘蹭地，一下就掉 30–50km/h */
+	UPROPERTY()
+	TObjectPtr<class UPhysicalMaterial> BodyPhysMat;
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> TintMIDs;   // 贴图车的可染色槽
 	UPROPERTY()

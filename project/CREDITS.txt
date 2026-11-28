@@ -1,22 +1,22 @@
 APEX DRIFT 素材署名与许可
 ========================
 
-车辆（车名均为游戏内虚构名；除注明外均已修改：拆件、重分材质、去除原有文字与标志、新增灯具/车牌/轮拱等）
+车辆（车名均为游戏内虚构名；均已修改：拆件、重分材质、去除原有文字与标志、换程序化轮胎、新增灯具/车牌等。
+SAETTA / FALCO / BOREAS / KESTREL 改自真实拉力车的模型，已去除全部厂标、赞助商标志与文字，与原厂无任何关联）
   APEX GT   “Sportscar” by Yasutoshi Mori (@MirageYM)，CC BY 2.0
             https://github.com/mmp/pbrt-v4-scenes/tree/master/sportscar
-  ONYX      “Concept Car 040 - public domain” by Unity Fan (unityfan777)，作者声明 CC0 / Sketchfab 记录 CC BY 4.0
-            https://sketchfab.com/3d-models/9363e93183274ea1bad403ea6fe3ee79
-  EMBER     “Concept Car 039 - public domain” by Unity Fan (unityfan777)，作者声明 CC0 / Sketchfab 记录 CC BY 4.0
-            https://sketchfab.com/3d-models/f17b9d37e0e34f15b4c2e417a98f5ed6
-  VELA      “Car Concept” © 2023 Darmstadt Graphics Group GmbH / Eric Chadwick（Khronos glTF Sample Assets），CC BY 4.0；
-            原型为 Unity Fan 的 “Concept Car 004”（作者声明 CC0）。已去除全部 Khronos / glTF 标志
-            https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept
-  SELVA     “Selva Hypercar concept by Max Hordin 2019” by maxhordin，CC BY 4.0
-            https://sketchfab.com/3d-models/e426a6e57b364b3fa6c29775c72cac05
-  IRONCLAD  “Muscle Car Concept” by ViktorKom，CC BY 4.0
-            https://sketchfab.com/3d-models/aa5dbdc7d492478ababfd4d385b8339f
-  RUSTBELT  “Hot Rod Pickup” by kird3rf，CC BY 4.0
-            https://sketchfab.com/3d-models/7b882dc2d7ed407689f8e851d5f8250f
+  GOBLIN    “Fictional supercar - V12 Goblin” by ollitei，CC BY 4.0
+            https://sketchfab.com/3d-models/0a20e49ad5774d778567cb5c3f345786
+  AGUNTA    “hypercar Agunta” by George.Schelfaut，CC BY 4.0
+            https://sketchfab.com/3d-models/df4fec2a00c247eb9b3bd31b81f575d0
+  SAETTA    改自 “Lancia Stratos HF - Rally - Alitalia Livery” by JamesSlater，CC BY 4.0（已去除全部品牌标志）
+            https://sketchfab.com/3d-models/76dfbe905346419d817fa03d1e46e547
+  FALCO     改自 “FREE Lancia Delta HF Integrale evo 2” by begemot.988888（TARANTULA），CC BY 4.0（已去除全部品牌标志）
+            https://sketchfab.com/3d-models/85614131e0dc4613a948472aaa935fc7
+  BOREAS    改自 “Audi Quattro S1 E2” by chwashere123，CC BY 4.0（已去除全部品牌标志）
+            https://sketchfab.com/3d-models/8d6665b23801431caa03ebbf8c8dfd13
+  KESTREL   改自 “Ford Capri Group B” by Tiaan.Pretorius，CC BY 4.0（已去除全部品牌标志）
+            https://sketchfab.com/3d-models/a8821371a98a4ccbad0beee12fd4f3e9
   许可全文 https://creativecommons.org/licenses/by/2.0/ 、https://creativecommons.org/licenses/by/4.0/
 
 地形高程

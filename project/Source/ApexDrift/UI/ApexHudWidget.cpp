@@ -823,7 +823,7 @@ private:
 		const FApexRect R(S.X * 0.5f - W * 0.5f, CY - 26.0f, W, 52.0f);
 		P.Skew(R, Ink(0.66f * A));
 		P.Skew(FApexRect(R.X, R.Y, 8.0f, R.H), Fade(Accent, A), Slant);
-		P.Text(TEXT("训练场"), R.X + 32.0f, CY, EApexFont::Display, 24.0f, Paper(A));
+		P.Text(TEXT("游乐场"), R.X + 32.0f, CY, EApexFont::Display, 24.0f, Paper(A));
 		P.Text(TEXT("随便开 · 按一次复位原地扶正 · 连按两次回起点并复原道具"), R.R() - 22.0f, CY, EApexFont::Body, 17.0f, Paper(0.86f * A), EApexH::Right);
 	}
 

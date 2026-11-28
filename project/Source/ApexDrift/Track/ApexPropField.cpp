@@ -41,6 +41,9 @@ void AApexPropField::BeginPlay()
 		C->SetSimulatePhysics(true);
 		C->SetCanEverAffectNavigation(false);
 		C->SetGenerateOverlapEvents(false);
+		// 游乐场有上千个可撞道具、每个一次绘制：350m 外不画（车速 300km/h 也有 4 秒以上的提前量）
+		C->LDMaxDrawDistance = 35000.0f;
+		C->SetCachedMaxDrawDistance(35000.0f);
 		C->SetupAttachment(GetRootComponent());
 		C->RegisterComponent();
 		C->SetMassOverrideInKg(NAME_None, P.MassKg, true);

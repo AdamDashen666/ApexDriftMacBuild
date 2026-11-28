@@ -62,10 +62,10 @@ const TArray<FApexMapInfo>& FApexMapRegistry::GetMaps()
 		FApexMapInfo& Train = Out.AddDefaulted_GetRef();
 		Train.Id = TEXT("TrainingPark");
 		Train.LevelPath = TEXT("/Game/Maps/L_TrainingPark");
-		Train.NameZh = TEXT("湖畔训练场");
-		Train.NameEn = TEXT("TRAINING PARK");
+		Train.NameZh = TEXT("湖畔游乐场");
+		Train.NameEn = TEXT("LAKESIDE PLAYGROUND");
 		Train.Region = TEXT("日本 · 富士湖畔");
-		Train.Tagline = TEXT("一平方公里超平坦场地：跳台、碗池、螺旋塔和能撞飞的道具");
+		Train.Tagline = TEXT("六平方公里游乐场：倾角椭圆、巨型跳台、翻滚环、墙骑弯、越野区和上千个能撞飞的道具");
 		Train.ThumbnailPath = TEXT("/Game/UI/Thumbs/T_Map_TrainingPark.T_Map_TrainingPark");
 		Train.LengthKm = 3.5f;
 		Train.Difficulty = 1;

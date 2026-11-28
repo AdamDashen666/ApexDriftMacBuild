@@ -16,7 +16,7 @@ namespace
 			{ TEXT("ShiftDown"),  TEXT("降挡"),     TEXT("降挡"), TEXT("手动挡时降一挡"),                 TEXT("手柄 LB"),                EKeys::Q },
 			{ TEXT("Camera"),     TEXT("切换视角"), TEXT("视角"), TEXT("几个机位轮流切换"), TEXT("手柄 Y"),                 EKeys::C },
 			{ TEXT("LookBack"),   TEXT("向后看"),   TEXT("后视"), TEXT("按住看车后"),                     TEXT("手柄右摇杆按下"),         EKeys::B },
-			{ TEXT("Reset"),      TEXT("复位"),     TEXT("复位"), TEXT("回到赛道；训练场连按两次回起点"), TEXT("手柄 View"), EKeys::R },
+			{ TEXT("Reset"),      TEXT("复位"),     TEXT("复位"), TEXT("回到赛道；游乐场连按两次回起点"), TEXT("手柄 View"), EKeys::R },
 			{ TEXT("Headlights"), TEXT("车灯"),     TEXT("车灯"), TEXT("开关前大灯"),                     TEXT("手柄十字键 ↑"),           EKeys::H },
 			{ TEXT("AutoRun"),    TEXT("自动漂移"), TEXT("自动"), TEXT("自动漂一圈，按驾驶键接管"), TEXT("手柄十字键 ↓"),      EKeys::F },
 			{ TEXT("Director"),   TEXT("自动运镜"), TEXT("运镜"), TEXT("自动漂移时开关电影运镜"),         TEXT("手柄十字键 →"),           EKeys::V },

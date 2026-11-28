@@ -44,12 +44,13 @@ const TArray<FApexCarInfo>& FApexCarRegistry::GetCars()
 	static const TArray<FApexCarInfo> Cars =
 	{
 		Make(TEXT("HeroCar"),  TEXT("APEX GT"),  TEXT("GT 赛道车"),   TEXT("碳纤宽体与大尾翼，各项均衡"),         1.00f, 368.f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, true,  true, 0),
-		Make(TEXT("Onyx"),     TEXT("ONYX"),     TEXT("宽体轿跑"),     TEXT("车身短、反应快，最好上手的漂移车"),   0.97f, 350.f, 0.98f, 1.12f, 1.10f, 1.04f, 1.00f, true,  true, 5),
-		Make(TEXT("Ironclad"), TEXT("IRONCLAD"), TEXT("V8 肌肉车"),    TEXT("大马力后驱，角度大、尾巴活"),         1.02f, 335.f, 0.90f, 0.94f, 1.16f, 0.82f, 1.10f, false, true, 6),
-		Make(TEXT("Vela"),     TEXT("VELA"),     TEXT("电动 GT"),      TEXT("起步最猛，安静顺滑"),                 1.14f, 340.f, 1.02f, 1.02f, 0.96f, 1.55f, 0.50f, false, false, 3),
-		Make(TEXT("Ember"),    TEXT("EMBER"),    TEXT("原型超跑"),     TEXT("长鼻低趴，高速抓地最稳"),             1.07f, 372.f, 1.10f, 0.98f, 0.90f, 1.10f, 1.00f, true,  true, 2),
-		Make(TEXT("Selva"),    TEXT("SELVA"),    TEXT("顶级超跑"),     TEXT("极速最高，适合跑圈刷时间"),           1.12f, 375.f, 1.06f, 1.06f, 0.94f, 1.16f, 1.00f, true,  true, 4),
-		Make(TEXT("Rustbelt"), TEXT("RUSTBELT"), TEXT("热棒皮卡"),     TEXT("外露 V8、巨型后轮，横着走最带劲"),    1.00f, 300.f, 0.84f, 0.96f, 1.20f, 0.74f, 1.15f, false, true, 7),
+		// 2026-11-28 换车：旧的 6 辆用户嫌丑，全部换掉；拉力车是用户点名要的真实车型改的，游戏里用虚构名字、去掉全部厂标
+		Make(TEXT("Goblin"),   TEXT("GOBLIN"),   TEXT("V12 中置超跑"), TEXT("自然吸气 V12，高速稳、出弯有劲"),     1.08f, 370.f, 1.06f, 1.02f, 0.96f, 1.12f, 1.05f, false, true, 5),
+		Make(TEXT("Agunta"),   TEXT("AGUNTA"),   TEXT("赛道超跑"),     TEXT("大尾翼下压力最强，过弯抓地最好"),     1.10f, 375.f, 1.10f, 1.04f, 0.92f, 1.08f, 1.00f, true,  true, 3),
+		Make(TEXT("Saetta"),   TEXT("SAETTA"),   TEXT("楔形拉力车"),   TEXT("轴距短、车头灵，甩尾最活"),           0.98f, 300.f, 0.94f, 1.14f, 1.18f, 0.95f, 1.05f, false, true, 2),
+		Make(TEXT("Falco"),    TEXT("FALCO"),    TEXT("四驱拉力掀背"), TEXT("四驱抓地稳，越野区最好开"),           1.04f, 290.f, 1.02f, 1.06f, 1.04f, 1.02f, 1.00f, true,  true, 3),
+		Make(TEXT("Boreas"),   TEXT("BOREAS"),   TEXT("B 组拉力怪兽"), TEXT("五缸涡轮爆发力强，起步最猛"),         1.12f, 305.f, 0.98f, 1.02f, 1.10f, 0.90f, 1.15f, true,  true, 6),
+		Make(TEXT("Kestrel"),  TEXT("KESTREL"),  TEXT("宽体 B 组赛车"), TEXT("超宽车身、后驱大马力，横着走最带劲"), 1.06f, 320.f, 0.94f, 0.96f, 1.18f, 0.85f, 1.12f, true,  true, 0),
 	};
 	return Cars;
 }
