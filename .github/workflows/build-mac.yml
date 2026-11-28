@@ -29,6 +29,8 @@ jobs:
       UE: ${{ github.workspace }}/UnrealEngine
       PROJ: ${{ github.workspace }}/project
       OUT: ${{ github.workspace }}/out
+      # MSBuild 节点用完就退，不留常驻进程（配合 Engine/Source/Programs/Directory.Build.rsp 串行编 .NET 工程）
+      MSBUILDDISABLENODEREUSE: "1"
     steps:
       - uses: actions/checkout@v5
 
@@ -182,6 +184,11 @@ jobs:
             git checkout --pathspec-from-file="$RUNNER_TEMP/deleted.txt" 2>&1 | tail -3
             echo "恢复后还缺：$(git ls-files -d | wc -l | tr -d ' ') 个"
           fi
+          echo "ICU 78 头文件 $(ls Engine/Source/ThirdParty/ICU/icu4c-78_1/include/unicode 2>/dev/null | wc -l | tr -d ' ') 个，Imath 头文件 $(ls Engine/Source/ThirdParty/Imath/Deploy/Imath-3.2.2/include/Imath 2>/dev/null | wc -l | tr -d ' ') 个"
+          # UBT / UAT 的 .NET 工程串行编译：并行时多个 MSBuild 节点会同时写 EpicGames.Core 等共享引用程序集，
+          # 写坏后报 “PE image doesn't contain managed metadata”（第 8、9、11 次偶发；第 16、17 次在 3 核机器上连续发生）。
+          # MSBuild 会读项目所在目录及上级目录的 Directory.Build.rsp
+          printf '%s\n' '-maxcpucount:1' '-nodeReuse:false' > Engine/Source/Programs/Directory.Build.rsp
           bash "$GITHUB_WORKSPACE/.github/scripts/ubt-config.sh" 2
           ( while sleep 300; do
               P=$(grep -a -o -E '^\[[0-9]+/[0-9]+\]' "$OUT/logs/compile.log" 2>/dev/null | tail -1)
