@@ -79,7 +79,7 @@ namespace ApexSim
 	constexpr float ChaosGrip = 0.0f;
 
 	// 调参用：命令行可临时覆盖（-ApexSimSlideF= -ApexSimSlideR= -ApexSimDecay= -ApexSimTcsSlip=），正式游玩用默认值
-	struct FTune { float SlideF = SlideLatF; float SlideR = SlideLatR; float Decay = 1.4f; float TcsSlip = 0.3f; float TcsHand = 0.1f; bool bOldTcs = false; float SpinBase = 1.2f; float SpinGain = 0.7f; float SpinGainHand = 2.0f; };
+	struct FTune { float SlideF = SlideLatF; float SlideR = SlideLatR; float Decay = 1.4f; float TcsSlip = 0.3f; float TcsHand = 0.1f; bool bOldTcs = false; bool bStrictTcs = false; float SpinBase = 1.2f; float SpinGain = 0.7f; float SpinGainHand = 2.0f; };
 	inline const FTune& Tune()
 	{
 		static const FTune T = []
@@ -90,6 +90,7 @@ namespace ApexSim
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimSpinGainHand="), R.SpinGainHand);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimTcsHand="), R.TcsHand);
 			R.bOldTcs = FParse::Param(FCommandLine::Get(), TEXT("ApexSimOldTCS"));   // 对比：v2.6 的“一横就放开”
+			R.bStrictTcs = FParse::Param(FCommandLine::Get(), TEXT("ApexSimStrictTCS"));   // 对比：v2.8 的“手刹甩起来也照样限”
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimSlideF="), R.SlideF);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimSlideR="), R.SlideR);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimDecay="), R.Decay);
@@ -1829,9 +1830,15 @@ void AApexDriftVehiclePawn::UpdateSimPhysics(float Dt, float SpeedKmh, bool bGro
 		// （按侧向“力”算不行：轮胎越过峰值后力反而变小，看着还有余量，实际已经在滑）
 		// 后轮已经横着滑（压路肩、蹭墙、收油甩尾）时也不放开，只许一点空转（TcsSlip × 峰值滑移率）：
 		// 第一版车身一过 12° 就整个放开，正好在最需要的时候失效，按着油门一滑就转圈。
-		// 只有拉着手刹时不限（手刹甩尾、360 照做；松手刹后立刻恢复，键盘乱点手刹再按油门的打转从 8 次 / 90 秒降到 6 次）；想用油门漂移就在设置里关掉
+		// 拉手刹起的横滑（玩家自己要漂）不限：从拉手刹起，直到车身稳住 1 秒（bSimHandSlide），都像 v2.6 那样放开油门，
+		// 用油门保持漂移、360 照做，空转由下面关牵引力控制时的上限管（v2.6 不限空转，容易转过头）。
+		// 2026-11-28 用户要求：v2.8 手刹松开 0.1 秒就恢复限油门，漂移只能靠惯性，油门续不上
 		SimHandT = bRawHandbrake ? 0.0f : SimHandT + Dt;
-		const bool bTCS = Tune().bOldTcs ? (bSimTCS && !bSimFree && FMath::Abs(SimPsi) < 12.0f && SimHandT > 0.6f && Gear > 0) : (bSimTCS && SimHandT > Tune().TcsHand && Gear > 0);
+		// 拉手刹起的横滑（玩家自己要漂、要原地转圈）；车身不再横着滑后 1 秒结束
+		if (bRawHandbrake) bSimHandSlide = true;
+		else if (!bSimFree && SimHandT > 1.0f) bSimHandSlide = false;
+		const bool bTCS = Tune().bOldTcs ? (bSimTCS && !bSimFree && FMath::Abs(SimPsi) < 12.0f && SimHandT > 0.6f && Gear > 0)
+			: (bSimTCS && SimHandT > Tune().TcsHand && Gear > 0 && (Tune().bStrictTcs || !bSimHandSlide));
 		float TcsCap = 1e9f;
 		if (bTCS)
 		{
@@ -1850,8 +1857,6 @@ void AApexDriftVehiclePawn::UpdateSimPhysics(float Dt, float SpeedKmh, bool bGro
 		// 关掉牵引力控制时后轮空转的上限：车身正着时只许中等空转，车尾横得越多许得越多（油门照样能甩尾、保持漂移）。
 		// 不限的话后轮会转到比车速快几倍（驱动力按胎面速度查表、升挡也不减力），侧向抓地全没了，直线全油门都会转圈。
 		// 拉手刹起的横滑（玩家自己要漂、要原地转圈）许得多；出弯给油、被撞歪这种不是自己要的横滑许得少，能救回来
-		if (bRawHandbrake) bSimHandSlide = true;
-		else if (!bSimFree && SimHandT > 1.0f) bSimHandSlide = false;
 		const float SpinGain = bSimHandSlide ? Tune().SpinGainHand : Tune().SpinGain;
 		float WsLim = 1e9f;
 		if (!bTCS && Gear > 0 && !bRawHandbrake && Tune().SpinBase < 50.0f)

@@ -233,9 +233,9 @@ void SApexSettings::Construct(const FArguments& InArgs)
 		FRow& Tc = Pg.Rows.AddDefaulted_GetRef();
 		Tc.Name = TEXT("牵引力控制");
 		Tc.Desc = TEXT("拟真档：不让油门把后轮踩空");
-		Tc.Detail = TEXT("只限油门，从不转车头。车已经滑起来（压路肩、蹭墙、收油甩尾）时也照样限住空转，按着油门不会越甩越大；拉手刹甩尾、360 不受影响。想用油门保持漂移就关掉：关掉后全油门能把车尾踩出去，也更容易打转。");
+		Tc.Detail = TEXT("只限油门，从不转车头。平时车滑起来（压路肩、蹭墙、收油甩尾）也照样限住空转，按着油门不会越甩越大。拉手刹甩起来以后不限，直到车身稳住：可以用油门保持漂移、做 360。关掉后任何时候全油门都能把车尾踩出去，也更容易打转。");
 		Tc.Options = { TEXT("开"), TEXT("关") };
-		Tc.OptionDescs = { TEXT("正常开车不会被油门甩尾，滑起来自动少给油，起漂用手刹"), TEXT("后轮随便空转：油门就能甩尾、保持漂移，但更容易打转") };
+		Tc.OptionDescs = { TEXT("平时不会被油门甩尾；用手刹起漂后放开油门，可以用油门续漂"), TEXT("后轮随便空转：油门就能甩尾、保持漂移，但更容易打转") };
 		Tc.Get = [](const UApexDriftSaveGame& S) { return S.bTractionControl ? 0 : 1; };
 		Tc.Set = [](UApexDriftSaveGame& S, int32 V) { S.bTractionControl = V == 0; };
 		Tc.DisabledWhy = [](const UApexDriftSaveGame& S) { return S.HandlingAssist == EApexHandlingAssist::SimulationRaw ? FString() : FString(TEXT("只在“拟真”档起作用")); };
