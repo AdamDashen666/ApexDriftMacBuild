@@ -79,7 +79,8 @@ namespace ApexSim
 	constexpr float ChaosGrip = 0.0f;
 
 	// 调参用：命令行可临时覆盖（-ApexSimSlideF= -ApexSimSlideR= -ApexSimDecay= -ApexSimTcsSlip=），正式游玩用默认值
-	struct FTune { float SlideF = SlideLatF; float SlideR = SlideLatR; float Decay = 1.4f; float TcsSlip = 0.3f; float TcsHand = 0.1f; bool bOldTcs = false; bool bStrictTcs = false; float SpinBase = 1.2f; float SpinGain = 0.7f; float SpinGainHand = 2.0f; };
+	struct FTune { float SlideF = SlideLatF; float SlideR = SlideLatR; float Decay = 1.4f; float TcsSlip = 0.3f; float TcsHand = 0.1f; bool bOldTcs = false; bool bStrictTcs = false; float SpinBase = 1.2f; float SpinGain = 0.7f; float SpinGainHand = 2.0f;
+		bool bTireModel = false; float BackAlign = 0.45f; float BackDamp = 6.0f; };   // BackDamp 2.2 时手刹甩到 144° 松手会冲过 180° 转回朝前
 	inline const FTune& Tune()
 	{
 		static const FTune T = []
@@ -91,6 +92,11 @@ namespace ApexSim
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimTcsHand="), R.TcsHand);
 			R.bOldTcs = FParse::Param(FCommandLine::Get(), TEXT("ApexSimOldTCS"));   // 对比：v2.6 的“一横就放开”
 			R.bStrictTcs = FParse::Param(FCommandLine::Get(), TEXT("ApexSimStrictTCS"));   // 对比：v2.8 的“手刹甩起来也照样限”
+			// 2026-11-28 起拟真档默认回到 v2.5 的做法（抓地态有车身稳定，手刹甩起来自由滑动）并允许倒着滑；
+			// v2.6–v2.9 的四轮轮胎模型只留作对比：-ApexSimTire
+			R.bTireModel = FParse::Param(FCommandLine::Get(), TEXT("ApexSimTire"));
+			FParse::Value(FCommandLine::Get(), TEXT("ApexSimBackAlign="), R.BackAlign);
+			FParse::Value(FCommandLine::Get(), TEXT("ApexSimBackDamp="), R.BackDamp);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimSlideF="), R.SlideF);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimSlideR="), R.SlideR);
 			FParse::Value(FCommandLine::Get(), TEXT("ApexSimDecay="), R.Decay);
@@ -862,6 +868,7 @@ void AApexDriftVehiclePawn::ResetHandlingState()
 	ExitAssistTimer = 0.0f;
 	WallAssistTimer = 0.0f;
 	bSimFree = false;
+	SimRate = 0.0f;
 	SimSpin = 0.0f;
 	SimCalmT = 0.0f;
 	SimRearSpeed = 0.0f;
@@ -1192,7 +1199,7 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	const float Dt = FMath::Clamp(DeltaSeconds, 0.001f, 0.05f);
 	const FApexCarInfo& C = Car();
 	bSimActive = false;
-	SetSimChassis(HandlingAssist == EApexHandlingAssist::SimulationRaw && !bControlsLocked && !AutoRun.IsActive());
+	SetSimChassis(HandlingAssist == EApexHandlingAssist::SimulationRaw && ApexSim::Tune().bTireModel && !bControlsLocked && !AutoRun.IsActive());
 
 	if (bControlsLocked)
 	{
@@ -1254,17 +1261,27 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	const float Beta = (SpeedKmh > 10.0f && bForward) ? SlipAngleDeg : 0.0f; // 速度相对车头的方向角，右正
 	const float AbsBeta = FMath::Abs(Beta);
 	const bool bPro = (HandlingAssist == EApexHandlingAssist::DriftPro);
+	const bool bSimRaw = (HandlingAssist == EApexHandlingAssist::SimulationRaw);
 
-	if (HandlingAssist == EApexHandlingAssist::SimulationRaw)
+	if (bSimRaw && ApexSim::Tune().bTireModel)
 	{
-		// 拟真档：整套交给轮胎模型，不进下面的漂移状态机、车身稳定和“倒着走就拧回来”
+		// 对比用（-ApexSimTire）：v2.6–v2.9 的轮胎模型，不进下面的漂移状态机、车身稳定和“倒着走就拧回来”
 		UpdateSimPhysics(Dt, SpeedKmh, bGrounded);
 		return;
 	}
-	bSimFree = false;
+	if (bSimRaw)
+	{
+		// 拟真档（v2.5 的做法 + 能倒着滑）：平时走下面的抓地态（带车身稳定，打方向不会滑出去），
+		// 手刹+方向甩起来以后交给 UpdateSimSlide 自由滑动
+		if (UpdateSimSlide(Dt, SpeedKmh, bGrounded, bForward)) return;
+	}
+	else
+	{
+		bSimFree = false;
+	}
 
 	// ---- 进入漂移：只由玩家主动触发，撞墙、落地造成的侧滑一律走抓地稳定 ----
-	if (bGrounded && bForward && SpeedKmh > 28.0f)
+	if (bGrounded && bForward && SpeedKmh > 28.0f && !bSimRaw)
 	{
 		const bool bHandEntry = bRawHandbrake && FMath::Abs(RawSteering) > 0.18f;
 		if (!bDriftActive)
@@ -1336,23 +1353,34 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	const FVector Up = GetActorUpVector();
 
 	// ---- 抓地系数（与天气无关） ----
-	// 高速时前轮略放、后轮收紧：后轴更稳，不打方向就走直线
-	const float Fast = FMath::Clamp((SpeedMs - 40.0f) / 40.0f, 0.0f, 1.0f);
-	SetAllWheelGrip(FMath::Lerp(1.15f, FMath::Lerp(3.4f, 2.5f, Fast), GripBlend), FMath::Lerp(0.95f, FMath::Lerp(3.9f, 4.6f, Fast), GripBlend));
+	if (bSimRaw)
+	{
+		// 拟真：正常轮胎抓地（甩起来以后由 UpdateSimSlide 接管）；直线拉手刹只锁后轮
+		const float FastS = FMath::Clamp((SpeedMs - 40.0f) / 40.0f, 0.0f, 1.0f);
+		SetAllWheelGrip(FMath::Lerp(3.1f, 2.4f, FastS), bRawHandbrake ? 1.5f : FMath::Lerp(3.6f, 4.4f, FastS));
+	}
+	else
+	{
+		// 高速时前轮略放、后轮收紧：后轴更稳，不打方向就走直线
+		const float Fast = FMath::Clamp((SpeedMs - 40.0f) / 40.0f, 0.0f, 1.0f);
+		SetAllWheelGrip(FMath::Lerp(1.15f, FMath::Lerp(3.4f, 2.5f, Fast), GripBlend), FMath::Lerp(0.95f, FMath::Lerp(3.9f, 4.6f, Fast), GripBlend));
+	}
 
 	// 侧向能力随速度（下压力）增长
-	const float LatMax = C.Grip * (16.5f + 5.0f * FMath::Clamp(FMath::Square(SpeedMs / 70.0f), 0.0f, 1.3f)) * (1.0f - 0.15f * RawBrake);
+	const float LatMax = C.Grip * ((bSimRaw ? 14.0f : 16.5f) + 5.0f * FMath::Clamp(FMath::Square(SpeedMs / 70.0f), 0.0f, 1.3f)) * (1.0f - 0.15f * RawBrake);
 
 	// ---- 转向 ----
 	float SteerDeg = 0.0f;
 	{
 		// 抓地极限允许的转角：阿克曼角 + 轮胎侧偏余量
 		const float V2 = FMath::Max(SpeedMs * SpeedMs, 1.0f);
-		const float LimitDeg = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(ApexCar::WheelBaseM * LatMax / V2)) + 5.5f, 6.0f, ApexCar::MaxSteerDeg);
+		const float LimitDeg = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(ApexCar::WheelBaseM * LatMax / V2)) + (bSimRaw ? 4.0f : 5.5f), bSimRaw ? 4.5f : 6.0f, ApexCar::MaxSteerDeg);
 		const float GripSteer = SmoothedSteer * LimitDeg;
 		// 漂移时前轮对准速度方向（自动反打），玩家输入做小幅修正
 		const float DriftSteer = FMath::Clamp(Beta + RawSteering * 7.0f, -ApexCar::MaxSteerDeg, ApexCar::MaxSteerDeg);
-		SteerDeg = FMath::Lerp(DriftSteer, GripSteer, GripBlend);
+		// 拟真：甩起来以后反打允许打满，平时按抓地极限给
+		const float SimSteer = (RawSteering * Beta > 0.0f) ? FMath::Clamp(SmoothedSteer * FMath::Max(LimitDeg, AbsBeta + 4.0f), -ApexCar::MaxSteerDeg, ApexCar::MaxSteerDeg) : GripSteer;
+		SteerDeg = bSimRaw ? SimSteer : FMath::Lerp(DriftSteer, GripSteer, GripBlend);
 	}
 	Move->SetSteeringInput(FMath::Clamp(SteerDeg / ApexCar::MaxSteerDeg, -1.0f, 1.0f));
 
@@ -1380,7 +1408,7 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	// 高速下压，免得过坡发飘
 	Body->AddForce(-Up * FMath::Min(0.0009f * SpeedMs * SpeedMs, 6.0f) * 100.0f * Mass);
 
-	// ---- 纵向：抓地态的加速/刹车补偿，速度才跟得上 ----
+	// ---- 纵向：抓地态的加速/刹车补偿（拟真档也给，速度才跟得上） ----
 	if (!bDriftActive)
 	{
 		const int32 Gear = Move->GetCurrentGear();
@@ -1425,7 +1453,28 @@ void AApexDriftVehiclePawn::UpdateHandling(float DeltaSeconds, float SpeedKmh, f
 	FVector AngVel = Body->GetPhysicsAngularVelocityInDegrees();
 	const float YawRate = FVector::DotProduct(AngVel, Up);
 
-	if (bDriftActive)
+	if (bSimRaw)
+	{
+		// 拟真（抓地态，相当于地平线的车身稳定）：允许一定侧滑不管，超出才扶正；手刹甩起来后不走这里
+		const float FastYaw = FMath::Clamp((SpeedMs - 35.0f) / 50.0f, 0.0f, 1.0f);
+		const float LowSpd = 1.0f - FMath::Clamp((SpeedKmh - 70.0f) / 90.0f, 0.0f, 1.0f);
+		const float Free = FMath::Lerp(3.0f, 0.3f, FastYaw) + 9.0f * C.Drift * RawThrottle * FMath::Abs(SmoothedSteer) * LowSpd;
+		const float Excess = Beta - FMath::Clamp(Beta, -Free, Free);
+		const float MaxYaw = FMath::Min(80.0f, FMath::RadiansToDegrees(LatMax / FMath::Max(SpeedMs, 6.0f)));
+		const float TargetRate = SmoothedSteer * MaxYaw;
+		const float PathRef = FMath::Lerp(PathRateDeg, TargetRate, FMath::Lerp(0.35f, 1.0f, FastYaw));
+		const float Recover = (WallAssistTimer > 0.0f) ? 1.0f : 0.0f;
+		const float DesiredYaw = FMath::Clamp(PathRef + (3.4f + 1.6f * Recover) * Excess, -145.0f, 145.0f);
+		const float W = FMath::Max3(FMath::Lerp(0.35f, 0.93f, FastYaw), FMath::Clamp(FMath::Abs(Excess) / 9.0f, 0.0f, 0.95f), 0.9f * Recover);
+		const float Stiff = FMath::Lerp(10.0f, 48.0f, FastYaw);
+		const float NewYaw = FMath::Lerp(YawRate, DesiredYaw, W * (1.0f - FMath::Exp(-Stiff * Dt)));
+		AngVel += Up * (NewYaw - YawRate);
+		Body->SetPhysicsAngularVelocityInDegrees(AngVel);
+		const float DesiredLat = SpeedMs * FMath::DegreesToRadians(TargetRate);
+		const float MeasuredLat = SpeedMs * FMath::DegreesToRadians(PathRateDeg);
+		Body->AddForce(Right * FMath::Clamp(0.55f * (DesiredLat - MeasuredLat), -6.0f, 6.0f) * FMath::Clamp(SpeedKmh / 60.0f, 0.0f, 1.0f) * 100.0f * Mass);
+	}
+	else if (bDriftActive)
 	{
 		const float SteerIn = RawSteering * DriftDir; // >0 往弯内打，<0 反打
 		const float BetaTarget = -DriftDir * DriftAngle;
@@ -1550,6 +1599,112 @@ void AApexDriftVehiclePawn::AutoApplyInputs(float Throttle, float Brake, float S
 		Move->SetSteeringInput(RawSteering);
 		Move->SetHandbrakeInput(bHand);
 	}
+}
+
+// 拟真档的自由滑动（v2.5 的做法，2026-11-28 加上能倒着滑）。车头绕行进方向的转动按惯性走：
+//   手刹+方向 给一个持续的甩出力矩，大过回正力矩，按住就一直转，360、720 都行；
+//   松开手刹后只剩轮胎自己的回正和阻尼：没甩过 90 度就自然转回车头朝前；
+//   甩过 90 度（像地平线那样一甩到底）就稳定在车尾朝前，一直倒着滑到车停，或者自己打方向 / 拉手刹转回来。
+//   油门+往弯内打 能把角度维持在 50 度左右；反打随时收。不做任何人为拉回。
+bool AApexDriftVehiclePawn::UpdateSimSlide(float Dt, float SpeedKmh, bool bGrounded, bool bForward)
+{
+	UChaosWheeledVehicleMovementComponent* Move = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovement());
+	USkeletalMeshComponent* Body = GetMesh();
+	const FApexCarInfo& C = Car();
+	const FVector Vel = GetVelocity();
+	const FVector Vel2D(Vel.X, Vel.Y, 0.0f);
+	const float SpeedMs = Vel2D.Size() * 0.01f;
+	const FVector Up = GetActorUpVector();
+	const float VelYaw = FMath::RadiansToDegrees(FMath::Atan2(Vel2D.Y, Vel2D.X));
+	const float Psi = (SpeedMs > 2.0f) ? FMath::FindDeltaAngleDegrees(VelYaw, GetActorRotation().Yaw) : 0.0f;
+	FVector AngVel = Body->GetPhysicsAngularVelocityInDegrees();
+	const float YawRate = FVector::DotProduct(AngVel, Up);
+
+	if (!bSimFree)
+	{
+		if (!(bGrounded && bForward && SpeedKmh > 30.0f && bRawHandbrake && FMath::Abs(RawSteering) > 0.18f))
+		{
+			SimPsi = Psi;
+			return false;
+		}
+		bSimFree = true;
+		SimRate = FMath::Clamp(YawRate - PathRateDeg, -60.0f, 60.0f);
+		SimSpin = 0.0f;
+		SimPsi = Psi;
+		SimAirT = 0.0f;
+		TangentAssist = 0.0f;
+	}
+
+	SimAirT = bGrounded ? 0.0f : SimAirT + Dt;
+	const float PrevPsi = SimPsi;
+	SimSpin += FMath::FindDeltaAngleDegrees(PrevPsi, Psi);
+	SimPsi = Psi;
+	const float AbsPsi = FMath::Abs(Psi);
+	const bool bCaught = !bRawHandbrake && AbsPsi < 60.0f && (PrevPsi * Psi < 0.0f || (AbsPsi < 5.0f && FMath::Abs(SimRate) < 30.0f));
+	if (FMath::Abs(SimSpin) > 325.0f && AbsPsi < 45.0f)
+	{
+		SimSpin -= FMath::Sign(SimSpin) * 360.0f;
+		if (DriftScoreComp) DriftScoreComp->AwardSpin();
+	}
+	if (bCaught || SpeedKmh < 12.0f || SimAirT > 0.35f)
+	{
+		bSimFree = false;
+		SimRate = 0.0f;
+		if (bCaught) WallAssistTimer = FMath::Max(WallAssistTimer, 0.30f);   // 收车那一下扶稳
+		return false;
+	}
+	if (!bGrounded)
+	{
+		return true;
+	}
+
+	// ---- 转动
+	const float Sp = FMath::Clamp(SpeedMs / 13.0f, 0.25f, 1.0f);
+	const float K = 515.0f * Sp;                                  // 回正力矩峰值（度/秒2）
+	const bool bInto = SmoothedSteer * Psi >= 0.0f;               // 往已经甩的方向打
+	float Torque = 0.0f;
+	if (bRawHandbrake) Torque = SmoothedSteer * K * 1.62f * C.Drift;
+	else if (bInto) Torque = SmoothedSteer * K * FMath::Lerp(0.30f, 0.76f, RawThrottle) * C.Drift;
+	else Torque = SmoothedSteer * K * 0.85f;                      // 反打
+	// 回正：90 度以内车头朝前稳定（-K·sinψ，v2.5 原样）；甩过 90 度以后车尾朝前稳定（+Kb·sinψ，弱一些，
+	// 打方向就能转回来）。v2.5 只有前一项，180 度是不稳定点，一松手刹车头就被拉回朝前，倒着滑不起来
+	const float BackW = FMath::SmoothStep(80.0f, 105.0f, AbsPsi);
+	const float SinPsi = FMath::Sin(FMath::DegreesToRadians(Psi));
+	const float Align = FMath::Lerp(-K * SinPsi, ApexSim::Tune().BackAlign * K * SinPsi, BackW);
+	const float FwdDamp = FMath::Lerp(3.6f, 0.9f, FMath::Clamp((AbsPsi - 55.0f) / 25.0f, 0.0f, 1.0f));
+	const float Damp = bRawHandbrake ? 1.5f : FMath::Lerp(FwdDamp, ApexSim::Tune().BackDamp, BackW);
+	SimRate += (Torque + Align - Damp * SimRate) * Dt;
+	SimRate = FMath::Clamp(SimRate, -345.0f, 345.0f);
+	if (!bRawHandbrake && SimRate * Psi < 0.0f && AbsPsi < 90.0f)
+	{
+		// 快转回正前时收住，不要甩过头
+		const float Cap = 5.2f * AbsPsi + 22.0f;
+		SimRate = FMath::Clamp(SimRate, -Cap, Cap);
+	}
+	const float DesiredYaw = PathRateDeg + SimRate;
+	AngVel += Up * ((DesiredYaw - YawRate) * (1.0f - FMath::Exp(-30.0f * Dt)));
+	Body->SetPhysicsAngularVelocityInDegrees(AngVel);
+
+	// ---- 轨迹：推力沿车头方向，横着时产生向心力；倒着时反而减速
+	SetAllWheelGrip(0.55f, bRawHandbrake ? 0.35f : 0.5f);
+	const float Mass = FMath::Max(500.0f, Body->GetMass());
+	const FVector Dir = Vel2D.GetSafeNormal();
+	const FVector Right(-Dir.Y, Dir.X, 0.0f);
+	const float SinP = SinPsi;
+	const float CosP = FMath::Cos(FMath::DegreesToRadians(Psi));
+	const float Lat = SinP * FMath::Lerp(5.0f, 14.0f, RawThrottle) * FMath::Lerp(1.0f, C.Grip, 0.6f) * FMath::Clamp(SpeedMs / 14.0f, 0.3f, 1.0f);
+	const float MeasLat = SpeedMs * FMath::DegreesToRadians(PathRateDeg);
+	const float LatF = FMath::Clamp(0.5f * Lat + 0.6f * (Lat - MeasLat), -15.0f, 15.0f);
+	float Tan = RawThrottle * C.Accel * FMath::Lerp(8.0f, 1.0f, FMath::Clamp((SpeedMs - 15.0f) / 38.0f, 0.0f, 1.0f)) * FMath::Max(CosP, -0.35f)
+		- 1.6f * FMath::Abs(SinP) - 0.4f - (bRawHandbrake ? 1.6f : 0.0f) - RawBrake * 9.0f - (1.0f - RawThrottle) * 1.5f;
+	TangentAssist = FMath::Clamp(TangentAssist + (Tan - TangentAccel) * 5.0f * Dt, -6.0f, 15.0f);
+	Body->AddForce((Right * LatF + Dir * TangentAssist - Up * FMath::Min(0.0009f * SpeedMs * SpeedMs, 5.0f)) * 100.0f * Mass);
+
+	// ---- 前轮：指向行进方向（自动反打的样子），玩家方向做修正
+	const float SteerDeg = AbsPsi < 95.0f ? FMath::Clamp(-Psi + SmoothedSteer * 9.0f, -ApexCar::MaxSteerDeg, ApexCar::MaxSteerDeg) : SmoothedSteer * 22.0f;
+	Move->SetSteeringInput(FMath::Clamp(SteerDeg / ApexCar::MaxSteerDeg, -1.0f, 1.0f));
+	if (AbsPsi > 75.0f && Move->GetCurrentGear() < 1) Move->SetTargetGear(FMath::Max(2, Move->GetTargetGear()), true);   // 倒着滑时别自己挂倒挡
+	return true;
 }
 
 // 拟真档：轮胎物理。四个轮胎各自按接地点速度算侧偏角和滑移率，按悬架载荷 + 载荷转移算附着，

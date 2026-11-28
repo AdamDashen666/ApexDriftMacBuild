@@ -176,7 +176,9 @@ private:
 	void UpdateHandling(float DeltaSeconds, float SpeedKmh, float SlipAngleDeg, bool bGrounded);
 	void SetAllWheelGrip(float FrontGrip, float RearGrip);
 	void EndDrift();
-	/** 拟真档：四个轮胎的物理模型（侧偏角、滑移率、载荷转移、摩擦圆、后轮空转 / 抱死），没有任何把车头拉回的控制 */
+	/** 拟真档的自由滑动（手刹甩起来以后，能倒着滑）；返回 true 表示本帧已由它接管 */
+	bool UpdateSimSlide(float Dt, float SpeedKmh, bool bGrounded, bool bForward);
+	/** 拟真档对比用（-ApexSimTire）：四个轮胎的物理模型（侧偏角、滑移率、载荷转移、摩擦圆、后轮空转 / 抱死），没有任何把车头拉回的控制 */
 	void UpdateSimPhysics(float Dt, float SpeedKmh, bool bGrounded);
 	/** 拟真档由轮胎模型出力时，Chaos 自己的轮胎和发动机只留一点点（转速、轮子转动、悬架照旧） */
 	void SetSimChassis(bool bOn);
@@ -250,7 +252,9 @@ private:
 	float DriftTime = 0.0f;
 	float DriftExitTimer = 0.0f;
 	float DriftAngle = 0.0f;        // 当前目标侧滑角（度），收到 0 就退出漂移
-	bool bSimFree = false;          // 拟真档：车身明显横着滑（含倒着滑），镜头和小地图跟行进方向
+	bool bSimFree = false;          // 拟真档：正在自由滑动（手刹触发，含倒着滑），镜头和小地图跟行进方向
+	float SimRate = 0.0f;           // 自由滑动：车头相对行进方向的角速度（度/秒）
+	float SimAirT = 0.0f;           // 自由滑动：离地时间
 	bool bSimHandSlide = false;     // 拟真档：这次横滑是玩家拉手刹起的（关牵引力控制时后轮可以多空转，漂移 / 原地转圈照做）
 	float SimPsi = 0.0f;            // 车头相对行进方向的夹角（度，右正，不折叠到 ±90）
 	float SimSpin = 0.0f;           // 这一段滑动里车头累计转过的角度（满一圈记一次 360）

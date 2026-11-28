@@ -226,19 +226,9 @@ void SApexSettings::Construct(const FArguments& InArgs)
 		As.OptionDescs = {
 			TEXT("点手刹触发漂移，松方向或反打马上回正，不容易打转。"),
 			TEXT("低速满油满舵也会甩尾，可用角度更大；松方向或反打同样能收住。"),
-			TEXT("轮胎物理（和地平线一样）：没有任何把车头拉回的辅助，甩出去要自己反打、收油，也能一直倒着滑。") };
+			TEXT("像地平线开着车身稳定：平时打方向、给油不会滑出去；拉手刹甩起来以后不再帮你拉回，要自己反打收车，甩过 90 度会一直倒着滑，也能做 360。") };
 		As.Get = [](const UApexDriftSaveGame& S) { return static_cast<int32>(S.HandlingAssist); };
 		As.Set = [](UApexDriftSaveGame& S, int32 V) { S.HandlingAssist = static_cast<EApexHandlingAssist>(V); };
-
-		FRow& Tc = Pg.Rows.AddDefaulted_GetRef();
-		Tc.Name = TEXT("牵引力控制");
-		Tc.Desc = TEXT("拟真档：不让油门把后轮踩空");
-		Tc.Detail = TEXT("只限油门，从不转车头。平时车滑起来（压路肩、蹭墙、收油甩尾）也照样限住空转，按着油门不会越甩越大。拉手刹甩起来以后不限，直到车身稳住：可以用油门保持漂移、做 360。关掉后任何时候全油门都能把车尾踩出去，也更容易打转。");
-		Tc.Options = { TEXT("开"), TEXT("关") };
-		Tc.OptionDescs = { TEXT("平时不会被油门甩尾；用手刹起漂后放开油门，可以用油门续漂"), TEXT("后轮随便空转：油门就能甩尾、保持漂移，但更容易打转") };
-		Tc.Get = [](const UApexDriftSaveGame& S) { return S.bTractionControl ? 0 : 1; };
-		Tc.Set = [](UApexDriftSaveGame& S, int32 V) { S.bTractionControl = V == 0; };
-		Tc.DisabledWhy = [](const UApexDriftSaveGame& S) { return S.HandlingAssist == EApexHandlingAssist::SimulationRaw ? FString() : FString(TEXT("只在“拟真”档起作用")); };
 
 		FRow& Tr = Pg.Rows.AddDefaulted_GetRef();
 		Tr.Name = TEXT("变速箱");
