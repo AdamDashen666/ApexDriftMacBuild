@@ -30,5 +30,11 @@ APEX DRIFT 素材署名与许可
 字体（SIL Open Font License 1.1）
   Barlow Condensed、Noto Sans SC、Noto Serif SC、Smiley Sans（得意黑）、Inter
 
+画面技术（仅 Windows 版）
+  NVIDIA DLSS（超分辨率 / DLAA）：使用 NVIDIA DLSS SDK 310.9.16（NVIDIA RTX SDKs License）。
+  NVIDIA、GeForce RTX、DLSS 是 NVIDIA Corporation 的商标。nvngx_dlss.dll 为 NVIDIA 原版签名文件，按其许可随游戏分发。
+  DLSS 5 神经渲染：第三方模组 OptiScaler-NR v0.10.0（GPL-3.0，源代码见
+  https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass），加载 NVIDIA 签名的 nvngx_dlssnr.dll 310.9.16；非 NVIDIA 官方发布。
+
 除上述车辆外的模型（樱花、枫树、杉松、鸟居、五重塔、民家、护栏、拱门等）、音效、界面与地图均为本项目原创或程序生成。
 车牌、APEX 字样与地名均为虚构，不指代任何真实厂商或赛事。

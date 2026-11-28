@@ -141,7 +141,7 @@ public:
 	FApexAutoRun& GetAutoRun() { return AutoRun; }
 	/** 自动驾驶的表现输入：油门/刹车/前轮角/手刹 + 前后轮抓地 */
 	void AutoApplyInputs(float Throttle, float Brake, float SteerDeg, bool bHand, float FrontGrip, float RearGrip);
-	void ApplyHandlingSettings(EApexHandlingAssist Assist, bool bManual, float InBaseFOV);
+	void ApplyHandlingSettings(EApexHandlingAssist Assist, bool bManual, float InBaseFOV, bool bTractionControl = true);
 	void SetControlsLocked(bool bLocked);
 	void SetPausedState(bool bPaused);
 
@@ -149,6 +149,11 @@ public:
 	AApexSkidmarkManager* GetSkidmarkManager() const { return SkidmarkManager; }
 	int32 GetPaintPresetIndex() const { return CurrentPaintPreset; }
 	bool IsDriftActive() const { return bDriftActive; }
+	/** 拟真档轮胎模型本帧的内部量（只在 -ApexBenchSim 时填，跑分日志用） */
+	const FString& GetSimDebug() const { return SimDebug; }
+	/** 拟真档本帧方向打满时前轮能转多少度（跑分机器人把想要的前轮角换算成输入用） */
+	float GetSimSteerLimit() const { return SimSteerLimit; }
+	bool RecentlyHitWall() const { return WallAssistTimer > 0.0f; }   // 0.45 秒内撞过墙（跑分统计用）
 	float GetRawSteering() const { return RawSteering; }
 
 protected:
@@ -171,8 +176,13 @@ private:
 	void UpdateHandling(float DeltaSeconds, float SpeedKmh, float SlipAngleDeg, bool bGrounded);
 	void SetAllWheelGrip(float FrontGrip, float RearGrip);
 	void EndDrift();
-	/** 拟真档的自由滑动（手刹甩起来以后）；返回 true 表示本帧已由它接管 */
-	bool UpdateSimSlide(float Dt, float SpeedKmh, bool bGrounded, bool bForward);
+	/** 拟真档：四个轮胎的物理模型（侧偏角、滑移率、载荷转移、摩擦圆、后轮空转 / 抱死），没有任何把车头拉回的控制 */
+	void UpdateSimPhysics(float Dt, float SpeedKmh, bool bGrounded);
+	/** 拟真档由轮胎模型出力时，Chaos 自己的轮胎和发动机只留一点点（转速、轮子转动、悬架照旧） */
+	void SetSimChassis(bool bOn);
+	void ApplyEngineTorque();
+	/** 第 i 个轮子的打滑程度 0..1 和是否在滑（烟、胎痕、轮胎声） */
+	float WheelSkid(int32 Wheel, const struct FWheelStatus& WS, float AbsSlipDeg, float SpeedKmh, bool& bOutSliding) const;
 	void UpdateWheelVisuals();
 	void UpdateCameraSystem(float DeltaSeconds, float SpeedKmh, float SlipAngleDeg);
 	void UpdateVFXAndSkidmarks(float DeltaSeconds, float& OutMaxSkid, bool& bOutOnCurb);
@@ -240,11 +250,27 @@ private:
 	float DriftTime = 0.0f;
 	float DriftExitTimer = 0.0f;
 	float DriftAngle = 0.0f;        // 当前目标侧滑角（度），收到 0 就退出漂移
-	bool bSimFree = false;          // 拟真档：正在自由滑动（手刹触发，不拉回）
-	float SimRate = 0.0f;           // 车头相对行进方向的角速度（度/秒）
-	float SimPsi = 0.0f;            // 车头相对行进方向的夹角（度，右正）
-	float SimSpin = 0.0f;           // 累计转过的角度
-	float SimAirT = 0.0f;
+	bool bSimFree = false;          // 拟真档：车身明显横着滑（含倒着滑），镜头和小地图跟行进方向
+	bool bSimHandSlide = false;     // 拟真档：这次横滑是玩家拉手刹起的（关牵引力控制时后轮可以多空转，漂移 / 原地转圈照做）
+	float SimPsi = 0.0f;            // 车头相对行进方向的夹角（度，右正，不折叠到 ±90）
+	float SimSpin = 0.0f;           // 这一段滑动里车头累计转过的角度（满一圈记一次 360）
+	float SimCalmT = 0.0f;          // 车身对正的持续时间，用来判断一段滑动结束
+	bool bSimChassis = false;       // Chaos 轮胎 / 发动机已切到拟真档的“只留一点”
+	bool bSimActive = false;        // 本帧由拟真轮胎模型出力
+	float SimRearSpeed = 0.0f;      // 后轮胎面线速度 m/s（空转时比车速快，抱死为 0）
+	float SimThrottle = 0.0f;       // 拟真档油门（键盘 0/1 输入在 0.25 秒内推满）
+	float SimRPM = 0.0f;            // 按后轮转速算的发动机转速（空转时会冲高）
+	FVector SimPrevVel = FVector::ZeroVector;   // 上一帧车身坐标速度 m/s
+	FVector2D SimAccel = FVector2D::ZeroVector; // 低通后的车身纵 / 横向加速度 m/s2
+	bool bSimPrevValid = false;
+	float SimSkid[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // 每个轮胎的打滑程度
+	FString SimDebug;
+	float SimSteerLimit = 30.0f;
+	bool bSimTCS = true;            // 拟真档牵引力控制（设置里可关）
+	float SimHandT = 10.0f;         // 松开手刹后过了多久
+	float SimRearLatUse = 0.0f;     // 后轮侧向附着的占用比例（上一帧）
+	float SimDbgTcs = -1.0f;
+	float SimShiftT = 0.0f;         // 距上次自动换挡的时间
 	float ExitAssistTimer = 0.0f;   // 刚退出漂移：强稳定
 	float LastPropHitTime = -10.0f;
 	float WallAssistTimer = 0.0f;   // 刚擦墙：强稳定

@@ -282,7 +282,7 @@ void AApexDriftPlayerController::OnPossess(APawn* InPawn)
 		if (SaveData)
 		{
 			VehiclePawn->ApplyPaintPreset(SaveData->PaintPresetIndex);
-			VehiclePawn->ApplyHandlingSettings(SaveData->HandlingAssist, SaveData->bManualTransmission, SaveData->BaseCameraFOV);
+			VehiclePawn->ApplyHandlingSettings(SaveData->HandlingAssist, SaveData->bManualTransmission, SaveData->BaseCameraFOV, SaveData->bTractionControl);
 			if (VehiclePawn->VehicleAudioComp)
 			{
 				VehiclePawn->VehicleAudioComp->ApplyVolumeSettings(SaveData->MasterVolume, SaveData->EngineVolume, SaveData->TireVolume, SaveData->SfxVolume);
@@ -629,7 +629,7 @@ void AApexDriftPlayerController::ApplyAndSaveSettings(bool bIncludeVideoMode)
 
 	if (VehiclePawn)
 	{
-		VehiclePawn->ApplyHandlingSettings(SaveData->HandlingAssist, SaveData->bManualTransmission, SaveData->BaseCameraFOV);
+		VehiclePawn->ApplyHandlingSettings(SaveData->HandlingAssist, SaveData->bManualTransmission, SaveData->BaseCameraFOV, SaveData->bTractionControl);
 		if (VehiclePawn->VehicleAudioComp)
 		{
 			VehiclePawn->VehicleAudioComp->ApplyVolumeSettings(SaveData->MasterVolume, SaveData->EngineVolume, SaveData->TireVolume, SaveData->SfxVolume);
@@ -902,6 +902,12 @@ void AApexDriftPlayerController::Tick(float DeltaSeconds)
 		bShouldPerformFullTickWhenPaused = true;
 		PrimaryActorTick.bTickEvenWhenPaused = true;
 		TickVerifyKeys();
+	}
+	static const bool bPick = FParse::Param(FCommandLine::Get(), TEXT("ApexVerifyPick"));
+	if (bPick)
+	{
+		bExternalDrive = true;
+		TickVerifyPick();
 	}
 	static const bool bFlow = FParse::Param(FCommandLine::Get(), TEXT("ApexVerifyFlow"));
 	if (bFlow)
@@ -1222,6 +1228,73 @@ void AApexDriftPlayerController::TickVerifyKeys()
 	case 20: if (Ok(1.0)) { Next(); FPlatformMisc::RequestExit(false); } break;
 	default: break;
 	}
+}
+
+void AApexDriftPlayerController::TickVerifyPick()
+{
+	// 跨关卡保留进度（换图后是新的控制器，静态变量还在）
+	static int32 Step = 0;
+	static double StepStart = 0.0;
+	static TArray<FString> Log;
+	const double Now = FPlatformTime::Seconds();
+	if (StepStart == 0.0) StepStart = Now;
+	const double E = Now - StepStart;
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("VerificationShots"));
+	IFileManager::Get().MakeDirectory(*Dir, true);
+	auto Next = [&]() { ++Step; StepStart = Now; };
+	auto Done = [&](bool bOk)
+	{
+		Log.Add(bOk ? TEXT("结果：通过") : TEXT("结果：失败"));
+		FFileHelper::SaveStringArrayToFile(Log, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Bench/verify_pick.txt")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		FPlatformMisc::RequestExit(false);
+	};
+	const int32 NMap = FApexMapRegistry::NumMaps();
+	int32 Train = -1;
+	for (int32 i = 0; i < NMap; ++i) if (FApexMapRegistry::GetMaps()[i].bFreeRoam) Train = i;
+	SApexScreen* Screen = MainMenuWidget ? MainMenuWidget->GetScreen() : nullptr;
+	SApexMainMenu* Menu = static_cast<SApexMainMenu*>(Screen);
+	if (Step <= NMap)
+	{
+		if (!Menu) return;
+		if (Step == 0)
+		{
+			if (E > 4.0) { Log.Add(FString::Printf(TEXT("起始地图 %s，共 %d 张，训练场是第 %d 张"), *GetWorld()->GetMapName(), NMap, Train + 1)); Next(); }
+			return;
+		}
+		// 逐张点卡片（走和鼠标点击 / 回车同一条 OnActivate），看选中的是不是这张
+		const int32 i = Step - 1;
+		if (E > 0.8)
+		{
+			Menu->DebugActivate(SApexMainMenu::IdMap0 + i);
+			const bool bOk = Menu->DebugSelectedMap() == i;
+			Log.Add(FString::Printf(TEXT("点第 %d 张（%s）：%s"), i + 1, *FApexMapRegistry::GetMaps()[i].NameZh, bOk ? TEXT("选中") : TEXT("没反应")));
+			FScreenshotRequest::RequestScreenshot(Dir / FString::Printf(TEXT("pick_%d.png"), i + 1), true, false);
+			if (!bOk) { Done(false); return; }
+			Next();
+		}
+		return;
+	}
+	if (Step == NMap + 1)
+	{
+		if (!Menu || E < 1.0) return;
+		Menu->DebugActivate(SApexMainMenu::IdMap0 + Train);
+		Menu->DebugActivate(SApexMainMenu::IdStart);
+		Log.Add(TEXT("选训练场后点“开始比赛”"));
+		Next();
+		return;
+	}
+	// 等加载进训练场
+	const bool bInTrain = GetWorld()->GetMapName().Contains(TEXT("TrainingPark")) && FApexMapRegistry::ClampIndex(CurrentMapIndex) == Train;
+	if (bInTrain && E > 4.0)
+	{
+		Log.Add(FString::Printf(TEXT("已进入 %s，状态 %d"), *GetWorld()->GetMapName(), (int32)CurrentGameState));
+		FScreenshotRequest::RequestScreenshot(Dir / TEXT("pick_train_loaded.png"), true, false);
+		Next();
+		if (Step > NMap + 3) Done(true);
+		return;
+	}
+	if (Step == NMap + 3 && E > 1.0) { Done(true); return; }
+	if (E > 45.0) { Log.Add(FString::Printf(TEXT("45 秒内没进训练场，当前 %s"), *GetWorld()->GetMapName())); Done(false); }
 }
 
 void AApexDriftPlayerController::TickVerifyFlow()

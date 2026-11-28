@@ -7,7 +7,7 @@
 class SApexSettings : public SApexScreen
 {
 public:
-	enum EId : int32 { IdTab0 = 10, IdRow0 = 100, IdDefaults = 60, IdBack = 61 };
+	enum EId : int32 { IdTab0 = 10, IdRow0 = 100, IdDefaults = 60, IdBack = 61, IdRestart = 62 };
 
 	void Construct(const FArguments& InArgs);
 	void DebugSetTab(int32 T) { Tab = T; TabT = 1.0f; FocusId = 0; }
@@ -39,6 +39,7 @@ private:
 		FString Detail;                     // 右侧长说明
 		TArray<FString> Options;
 		TArray<FString> OptionDescs;
+		TOptional<int32> DefaultChoice;    // 外部配置项可指定默认值
 		TFunction<int32(const UApexDriftSaveGame&)> Get;
 		TFunction<void(UApexDriftSaveGame&, int32)> Set;
 		TFunction<float(const UApexDriftSaveGame&)> GetF;

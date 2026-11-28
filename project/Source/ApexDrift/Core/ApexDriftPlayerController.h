@@ -209,6 +209,7 @@ private:
 	void TickVerifyInput();  // -ApexVerifyInput：在进程内发真实键盘事件，检查整条输入链路
 	void TickVerifyCars();   // -ApexVerifyCars：菜单里逐辆换车截图
 	void TickVerifyFlow();   // -ApexVerifyFlow：按真实按钮走一遍菜单/跨图/暂停/结算并截图
+	void TickVerifyPick();   // -ApexVerifyPick：主菜单逐张点地图卡片（含第 4 张湖畔训练场），再点开始比赛，确认进的是训练场
 	void TickVerifyKeys();   // -ApexVerifyKeys：在设置页用真实按键改键，再开车检查新键生效、旧键失效
 	int32 VerifyPhase = 0;
 	double VerifyPhaseStartTime = 0.0;

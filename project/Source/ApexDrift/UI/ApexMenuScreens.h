@@ -18,6 +18,7 @@ public:
 	void ResetSelection();
 	// 截图流程用
 	void DebugSelectMap(int32 Map) { SelMap = Map; HeroMap = Map; HeroT = 1.0f; }
+	int32 DebugSelectedMap() const { return SelMap; }
 
 protected:
 	virtual void BuildItems(const FVector2f& S) override;

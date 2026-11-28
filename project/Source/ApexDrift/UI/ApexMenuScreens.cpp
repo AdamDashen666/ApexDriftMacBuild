@@ -313,7 +313,8 @@ void SApexMainMenu::TickScreen(float Dt)
 
 void SApexMainMenu::OnActivate(int32 Id, const FVector2f& LocalPos, bool bMouse)
 {
-	if (Id >= IdMap0 && Id < IdMap0 + 3) { SelectMap(Id - IdMap0); return; }
+	// 地图卡片按地图表的实际数量判断（曾写死 3 张，第 4 张“湖畔训练场”点了没反应）
+	if (Id >= IdMap0 && Id < IdMap0 + FApexMapRegistry::NumMaps()) { SelectMap(Id - IdMap0); return; }
 	if (Id >= IdMode0 && Id < IdMode0 + 3)
 	{
 		SelMode = static_cast<EApexGameModeType>(Id - IdMode0);

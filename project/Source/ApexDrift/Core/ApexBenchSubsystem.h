@@ -51,6 +51,9 @@ private:
 	float MonkeyHold = 0.0f;
 	float MonkeyHand = 0.0f;
 	float MonkeyHandNext = 4.0f;
+	float MonkeyRandomT = -1.0f, MonkeyRandLastT = -99.0f, MonkeyWallT = -99.0f, MonkeyHandT = -99.0f;
+	float MonkeySlideT = -1.0f, MonkeySlideV = 0.0f, MonkeySlideThr = 0.0f, MonkeySlideStr = 0.0f;
+	TArray<FString> MonkeyEvents;   // 每次掉头前后的情况
 	float CurDrift = 0.0f;
 	float MaxDriftRun = 0.0f;   // 单次连续漂移最长秒数
 	float CurCrooked = 0.0f;
@@ -62,6 +65,19 @@ private:
 	float KeyMaxSlip = 0.0f;
 	void DriveKeys(float DeltaTime);
 	void DriveSpin(float DeltaTime);
+	/** -ApexBenchPad -ApexBenchSim：拟真档轮胎物理（直线稳定 / 甩尾后有没有被拉回 / 倒着滑 / 油门甩尾 / 机器人保持漂移 / 倒车） */
+	void DriveSim(float DeltaTime);
+	int32 SimCase = 0, SimStage = 0;
+	float SimT = 0.0f, SimPsiPrev = 0.0f, SimPeak = 0.0f, SimBackT = 0.0f, SimErrSum = 0.0f, SimBandT = 0.0f, SimMaxYaw = 0.0f, SimMaxPsiStraight = 0.0f;
+	int32 SimErrN = 0;
+	float SimPsiPrevAcc = 0.0f;
+	float SimMarks[3] = { -1.0f, -1.0f, -1.0f };
+	/** -ApexBenchPad -ApexBenchGrip：键盘玩家平时开车（不拉手刹）的出弯给油、弯中收油、刹车入弯、蛇行、变道、S 弯，量最大侧滑和松手后多久稳住 */
+	void DriveGrip(float DeltaTime);
+	int32 GripCase = 0, GripStep = -1;
+	float GripT = 0.0f, GripPeak = 0.0f, GripPeakYaw = 0.0f, GripCalmT = -1.0f, GripStepPeak = 0.0f;
+	FString GripSteps;
+	TArray<FString> GripSummary;
 	void DriveRamps(float DeltaTime);   // -ApexBenchRamps：训练场逐个坡道冲一遍，量腾空、落地、翻车，再撞道具
 	float RampAir = 0.0f, RampMaxZ = 0.0f, RampMinUp = 1.0f, RampLat = 0.0f, RampMinFps = 0.0f, RampWorstMs = 0.0f;
 	int32 RampShot = 0;

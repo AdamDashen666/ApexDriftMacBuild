@@ -4,6 +4,7 @@
 #include "Core/ApexDriftPlayerController.h"
 #include "Core/ApexMapRegistry.h"
 #include "Core/ApexKeyBindings.h"
+#include "Core/ApexNeuralRenderingSettings.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Vehicle/ApexDriftVehiclePawn.h"
 #include "Track/ApexTrackSplineActor.h"
@@ -52,6 +53,7 @@ void UApexBenchSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	bRace = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchRace"));
 	bKeys = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchKeys"));
 	bMonkey = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchMonkey"));
+	if (bMonkey) FMath::RandInit(20261127);   // 乱打的节奏每次一样，便于对比不同版本
 	FParse::Value(FCommandLine::Get(), TEXT("ApexBenchSecs="), MaxSecs);
 	FParse::Value(FCommandLine::Get(), TEXT("ApexBenchShots="), ShotInterval);
 	FParse::Value(FCommandLine::Get(), TEXT("ApexBenchSpeed="), CruiseKmh);
@@ -123,7 +125,9 @@ void UApexBenchSubsystem::Tick(float DeltaTime)
 	if (bPad)
 	{
 		static const bool bSpin = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchSpin"));
-		if (bSpin) DriveSpin(DeltaTime); else if (bKeys) DriveKeys(DeltaTime); else DrivePad(DeltaTime);
+		static const bool bSimBench = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchSim"));
+		static const bool bGrip = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchGrip"));
+		if (bGrip) DriveGrip(DeltaTime); else if (bSimBench) DriveSim(DeltaTime); else if (bSpin) DriveSpin(DeltaTime); else if (bKeys) DriveKeys(DeltaTime); else DrivePad(DeltaTime);
 		return;
 	}
 	static const bool bRamps = FParse::Param(FCommandLine::Get(), TEXT("ApexBenchRamps"));
@@ -431,10 +435,12 @@ void UApexBenchSubsystem::Drive(float DeltaTime)
 		{
 			MonkeySteer = FMath::Abs(Steer) > 0.30f ? FMath::Sign(Steer) : 0.0f;
 			MonkeyHold = FMath::FRandRange(0.08f, 0.22f);
-			if (FMath::FRand() < 0.07f) { MonkeySteer = FMath::RandBool() ? 1.0f : -1.0f; MonkeyHold = FMath::FRandRange(0.35f, 0.7f); }
+			MonkeyRandomT = -1.0f;
+			if (FMath::FRand() < 0.07f) { MonkeySteer = FMath::RandBool() ? 1.0f : -1.0f; MonkeyHold = FMath::FRandRange(0.35f, 0.7f); MonkeyRandomT = Elapsed; }
 		}
 		MonkeyHandNext -= DeltaTime;
-		if (MonkeyHandNext <= 0.0f && Tel.SpeedKmh > 60.0f) { MonkeyHand = FMath::FRandRange(0.2f, 0.5f); MonkeyHandNext = FMath::FRandRange(4.0f, 9.0f); }
+		static const bool bNoHand = FParse::Param(FCommandLine::Get(), TEXT("ApexMonkeyNoHand"));   // 不拉手刹的普通键盘玩家
+		if (!bNoHand && MonkeyHandNext <= 0.0f && Tel.SpeedKmh > 60.0f) { MonkeyHand = FMath::FRandRange(0.2f, 0.5f); MonkeyHandNext = FMath::FRandRange(4.0f, 9.0f); }
 		MonkeyHand -= DeltaTime;
 		Steer = MonkeySteer;
 		bHand = MonkeyHand > 0.0f;
@@ -476,6 +482,21 @@ void UApexBenchSubsystem::Drive(float DeltaTime)
 		}
 	}
 	const bool bBackwards = FVector::DotProduct(Car->GetActorForwardVector(), DirAt(0.0f)) < -0.2f;
+	if (bMonkey)
+	{
+		// 掉头原因统计：最近撞过墙、最近点过手刹、乱打满舵
+		if (Car->RecentlyHitWall()) MonkeyWallT = Elapsed;
+		if (bHand) MonkeyHandT = Elapsed;
+		if (MonkeyRandomT >= 0.0f) MonkeyRandLastT = Elapsed;
+		if (AbsSlip > 20.0f && MonkeySlideT < 0.0f && Tel.SpeedKmh > 25.0f) { MonkeySlideT = Elapsed; MonkeySlideV = Tel.SpeedKmh; MonkeySlideThr = Throttle; MonkeySlideStr = Steer; }
+		if (AbsSlip < 8.0f) MonkeySlideT = -1.0f;
+		if (bBackwards && !bSpinning)
+		{
+			MonkeyEvents.Add(FString::Printf(TEXT("  掉头 t=%.1f s=%.0fm：开始滑(>20°) %.1fs 前 v=%.0f 油=%.1f 方向=%.0f | 距撞墙 %.1fs 距手刹 %.1fs 距乱打满舵 %.1fs"),
+				Elapsed, Dist * 0.01f, MonkeySlideT >= 0.0f ? Elapsed - MonkeySlideT : -1.0f, MonkeySlideV, MonkeySlideThr, MonkeySlideStr,
+				Elapsed - MonkeyWallT, Elapsed - MonkeyHandT, Elapsed - MonkeyRandLastT));
+		}
+	}
 	if (bBackwards && !bSpinning) ++Spins;
 	bSpinning = bBackwards;
 	if (FMath::Abs(Lat) > MaxLateral)
@@ -652,6 +673,283 @@ void UApexBenchSubsystem::DriveSpin(float DeltaTime)
 	}
 }
 
+void UApexBenchSubsystem::DriveSim(float DeltaTime)
+{
+	// 每个场景：起步到目标速度 → 动作 → 全松观察。psi = 车头相对行进方向（右正，不折叠），倒着走就是 ±180
+	struct FSimCase { const TCHAR* Name; float Kmh; float ActSecs; float ObsSecs; };
+	static const FSimCase Cases[] = {
+		{ TEXT("直线全油门"), 0.f, 24.0f, 0.0f },
+		{ TEXT("100km/h 手刹+右 0.45s 后全松"), 100.f, 0.45f, 3.0f },
+		{ TEXT("110km/h 手刹甩到 140 度后全松（倒着滑）"), 110.f, 3.0f, 4.0f },
+		{ TEXT("55km/h 全油门满舵（油门甩尾）"), 55.f, 2.0f, 2.0f },
+		{ TEXT("90km/h 机器人用反打+油门保持右漂 35 度"), 90.f, 6.3f, 2.0f },
+		{ TEXT("70km/h 手刹一甩再全油门满舵（甩圈）"), 70.f, 4.0f, 2.0f },
+		{ TEXT("停车按住刹车（倒车）"), 0.f, 4.0f, 0.0f },
+	};
+	AApexDriftPlayerController* PC = Cast<AApexDriftPlayerController>(GetWorld()->GetFirstPlayerController());
+	AApexDriftVehiclePawn* Car = PC ? PC->GetVehiclePawn() : nullptr;
+	if (!Car) return;
+	if (SimCase >= UE_ARRAY_COUNT(Cases)) { Finish(); Phase = 3; return; }
+	const FSimCase& C = Cases[SimCase];
+	const FApexDriftTelemetry& Tel = Car->GetTelemetry();
+	if (SimT <= 0.0f && SimStage == 0)
+	{
+		Car->ResetToTrack();
+		Car->SetActorTransform(FTransform(FRotator::ZeroRotator, FVector(-150000.0f, 0.0f, 150120.0f)), false, nullptr, ETeleportType::TeleportPhysics);
+		Car->GetMesh()->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Car->GetMesh()->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		SimPeak = SimBackT = SimErrSum = SimBandT = SimMaxYaw = SimMaxPsiStraight = 0.0f;
+		SimErrN = 0;
+		SimMarks[0] = SimMarks[1] = SimMarks[2] = -1.0f;
+		SimPsiPrev = 0.0f;
+		SimPsiPrevAcc = 0.0f;
+		PadLog.Add(FString::Printf(TEXT("--- %s"), C.Name));
+	}
+	SimT += DeltaTime;
+	const FVector Vel = Car->GetVelocity();
+	const float Psi = Vel.Size2D() > 200.0f ? FMath::FindDeltaAngleDegrees(FMath::RadiansToDegrees(FMath::Atan2(Vel.Y, Vel.X)), Car->GetActorRotation().Yaw) : 0.0f;
+	const float PsiDot = FMath::FindDeltaAngleDegrees(SimPsiPrev, Psi) / FMath::Max(DeltaTime, 1e-3f);
+	SimPsiPrev = Psi;
+	const float Yaw = Car->GetMesh()->GetPhysicsAngularVelocityInDegrees().Z;
+	const float Fwd = Car->GetActorTransform().InverseTransformVectorNoScale(Vel).X * 0.036f;   // 沿车头的速度 km/h，倒着走为负
+	float Thr = 0.0f, Brk = 0.0f, Str = 0.0f;
+	bool bHand = false;
+	bool bNext = false;
+	if (SimStage == 0)
+	{
+		Thr = 1.0f;
+		static const bool bNoTire = FParse::Param(FCommandLine::Get(), TEXT("ApexSimNoTire"));
+		if (bNoTire && C.Kmh > 0.0f && SimT > 0.8f)
+		{
+			// 调试：轮胎模型不出力时直接给车速，看 Chaos 自己会不会让车转弯 / 减速
+			Car->GetMesh()->SetPhysicsLinearVelocity(Car->GetActorForwardVector() * C.Kmh / 0.036f);
+			bNext = true;
+		}
+		bNext = bNext || C.Kmh <= 0.0f || (SimT > 0.6f && Tel.SpeedKmh >= C.Kmh) || SimT > 14.0f;
+	}
+	else if (SimStage == 1)
+	{
+		switch (SimCase)
+		{
+		case 0:
+			Thr = 1.0f;
+			for (int32 k = 0; k < 3; ++k) if (SimMarks[k] < 0.0f && Tel.SpeedKmh >= 100.0f * (k + 1)) SimMarks[k] = SimT;
+			if (Tel.SpeedKmh > 30.0f)
+			{
+				SimMaxPsiStraight = FMath::Max(SimMaxPsiStraight, FMath::Abs(Psi));
+				SimMaxYaw = FMath::Max(SimMaxYaw, FMath::Abs(Yaw));
+			}
+			SimPeak = FMath::Max(SimPeak, Tel.SpeedKmh);
+			break;
+		case 1: bHand = true; Str = 1.0f; Thr = 0.5f; break;
+		case 2:
+			bHand = true; Str = 1.0f; Thr = 0.3f;
+			if (FMath::Abs(Psi) >= 140.0f) bNext = true;
+			break;
+		case 3: Thr = 1.0f; Str = 1.0f; break;
+		case 4:
+			if (SimT < 0.3f) { bHand = true; Str = 1.0f; Thr = 0.6f; }
+			else
+			{
+				// 像司机：前轮对准前轴实际往哪走（再往弯里一点给前轮侧向力），角度不够就少反打多给油，甩多了就多反打收油
+				const FVector Vl = Car->GetActorTransform().InverseTransformVectorNoScale(Vel) * 0.01f;
+				const float Rr = FMath::DegreesToRadians(Yaw);
+				const float FrontAng = Vl.X > 0.5f ? FMath::RadiansToDegrees(FMath::Atan2(Vl.Y + 1.4975f * Rr, Vl.X)) : 0.0f;
+				const float E = Psi - 35.0f;
+				const float Bias = FMath::Clamp(3.0f - 0.45f * E - 0.06f * PsiDot, -14.0f, 14.0f);
+				Str = FMath::Clamp((FrontAng + Bias) / FMath::Max(Car->GetSimSteerLimit(), 4.0f), -1.0f, 1.0f);
+				Thr = FMath::Clamp(0.80f - 0.03f * E - 0.004f * PsiDot, 0.15f, 1.0f);
+				if (SimT > 1.8f)
+				{
+					SimErrSum += FMath::Abs(E);
+					++SimErrN;
+					if (FMath::Abs(E) < 12.0f) SimBandT += DeltaTime;
+				}
+			}
+			break;
+		case 5:
+			if (SimT < 0.4f) { bHand = true; Str = 1.0f; Thr = 0.5f; }
+			else { Thr = 1.0f; Str = 1.0f; }
+			SimErrSum += FMath::Abs(FMath::FindDeltaAngleDegrees(SimPsiPrevAcc, Psi));   // 累计转角
+			SimPsiPrevAcc = Psi;
+			break;
+		case 6: Brk = 1.0f; SimPeak = FMath::Min(SimPeak, Fwd); break;
+		default: break;
+		}
+		if (SimCase != 0 && SimCase != 6) SimPeak = FMath::Max(SimPeak, FMath::Abs(Psi));
+		bNext = bNext || SimT >= C.ActSecs;
+	}
+	else
+	{
+		// 全松：看车头会不会被拉回、倒着滑能滑多久
+		SimPeak = FMath::Max(SimPeak, FMath::Abs(Psi));
+		if (FMath::Abs(Psi) > 140.0f) SimBackT += DeltaTime;
+		if (SimMarks[0] < 0.0f && FMath::Abs(Psi) < 5.0f && FMath::Abs(Yaw) < 8.0f) SimMarks[0] = SimT;
+		bNext = SimT >= C.ObsSecs;
+	}
+	Car->SetThrottleInput(Thr);
+	Car->SetBrakeInput(Brk);
+	Car->SetSteeringInput(Str);
+	Car->SetHandbrakeInput(bHand);
+	// 手动挡：和跑圈机器人一样到红线升挡、转速太低降挡（手刹时不降）
+	ShiftCooldown = FMath::Max(0.0f, ShiftCooldown - DeltaTime);
+	if (Tel.bManualGearbox && ShiftCooldown <= 0.0f && Tel.Gear > 0 && !bHand)
+	{
+		if (Tel.EngineRPM > Tel.MaxRPM * 0.90f) { Car->ShiftUp(); ShiftCooldown = 0.4f; }
+		else if (Tel.EngineRPM < Tel.MaxRPM * 0.42f && Tel.Gear > 1) { Car->ShiftDown(); ShiftCooldown = 0.4f; }
+	}
+	PadLogTimer += DeltaTime;
+	if (SimStage > 0 && PadLogTimer >= 0.1f)
+	{
+		PadLogTimer = 0.0f;
+		PadLog.Add(FString::Printf(TEXT("  s%d t=%.1f v=%.0f 沿车头=%.0f psi=%.0f dpsi=%.0f yaw=%.0f 挡=%d rpm=%.0f 油=%.2f 方向=%.2f%s"),
+			SimStage, SimT, Tel.SpeedKmh, Fwd, Psi, PsiDot, Yaw, Tel.Gear, Tel.EngineRPM, Thr, Str, bHand ? TEXT(" 手刹") : TEXT("")));
+		if (!Car->GetSimDebug().IsEmpty()) PadLog.Add(TEXT("      ") + Car->GetSimDebug());
+	}
+	if (!bNext) return;
+	const bool bCaseDone = (SimStage == 1 && C.ObsSecs <= 0.0f) || SimStage == 2;
+	if (SimStage == 1 && SimCase == 1) PadLog.Add(FString::Printf(TEXT("  .. 甩出 %.0f 度，v=%.0f"), FMath::Abs(Psi), Tel.SpeedKmh));
+	if (SimStage == 1 && SimCase == 2) PadLog.Add(FString::Printf(TEXT("  .. 甩到 %.0f 度用了 %.2fs，v=%.0f"), FMath::Abs(Psi), SimT, Tel.SpeedKmh));
+	if (bCaseDone)
+	{
+		FString R;
+		switch (SimCase)
+		{
+		case 0: R = FString::Printf(TEXT("0-100 %.2fs  0-200 %.2fs  0-300 %.2fs  最高 %.0fkm/h  直线最大侧滑 %.1f°  最大横摆 %.1f°/s"), SimMarks[0], SimMarks[1], SimMarks[2], SimPeak, SimMaxPsiStraight, SimMaxYaw); break;
+		case 1: R = FString::Printf(TEXT("全松 3 秒：最大 %.0f°，结束 psi %.0f° v=%.0f，%s"), SimPeak, Psi, Tel.SpeedKmh, SimMarks[0] >= 0.0f ? *FString::Printf(TEXT("%.2fs 自己回正"), SimMarks[0]) : TEXT("没有回正")); break;
+		case 2: R = FString::Printf(TEXT("全松后倒着滑（|psi|>140）共 %.2fs，结束 psi %.0f° v=%.0f 沿车头 %.0f"), SimBackT, Psi, Tel.SpeedKmh, Fwd); break;
+		case 3: R = FString::Printf(TEXT("最大甩尾 %.0f°，松开 2 秒后 psi %.0f° v=%.0f"), SimPeak, Psi, Tel.SpeedKmh); break;
+		case 4: R = FString::Printf(TEXT("保持段平均误差 %.1f°，±12° 内 %.0f%%，最大 %.0f°，结束 psi %.0f° v=%.0f"), SimErrN ? SimErrSum / SimErrN : 0.0f, 100.0f * SimBandT / 4.5f, SimPeak, Psi, Tel.SpeedKmh); break;
+		case 5: R = FString::Printf(TEXT("车头相对行进方向累计转了 %.0f°（%.1f 圈），结束 v=%.0f"), SimErrSum, SimErrSum / 360.0f, Tel.SpeedKmh); break;
+		case 6: R = FString::Printf(TEXT("倒车最快 %.0fkm/h，挡位 %d"), -SimPeak, Tel.Gear); break;
+		default: break;
+		}
+		PadLog.Add(FString::Printf(TEXT("=== %s：%s"), C.Name, *R));
+		++SimCase;
+		SimStage = 0;
+	}
+	else
+	{
+		++SimStage;
+	}
+	SimT = 0.0f;
+}
+
+void UApexBenchSubsystem::DriveGrip(float DeltaTime)
+{
+	// 每组：直线加速到 Kmh → 依次执行动作（键盘：方向 -1/0/+1，油门 0/1）→ 松方向、油门踩住 2.5 秒看能不能稳住
+	struct FGripStep { const TCHAR* Name; float Dur; float Thr; float Brk; float Str; float Kick; bool bHand; };
+	struct FGripCase { const TCHAR* Name; float Kmh; int32 N; FGripStep S[4]; };
+	static const FGripCase Cases[] = {
+		{ TEXT("50km/h 满油满舵"), 50.f, 1, { { TEXT("满舵+全油门"), 2.0f, 1, 0, 1 } } },
+		{ TEXT("100km/h 滑行入弯再出弯给油"), 100.f, 2, { { TEXT("收油满舵"), 1.2f, 0, 0, 1 }, { TEXT("满舵+全油门"), 1.5f, 1, 0, 1 } } },
+		{ TEXT("140km/h 弯中突然收油"), 140.f, 2, { { TEXT("满舵+油门"), 1.0f, 1, 0, 1 }, { TEXT("满舵收油"), 1.2f, 0, 0, 1 } } },
+		{ TEXT("180km/h 带刹车入弯再给油"), 180.f, 2, { { TEXT("刹车0.6+满舵"), 1.2f, 0, 0.6f, 1 }, { TEXT("满舵+全油门"), 1.0f, 1, 0, 1 } } },
+		{ TEXT("70km/h 重刹入急弯再给油"), 70.f, 2, { { TEXT("满刹+满舵"), 0.6f, 0, 1, 1 }, { TEXT("满舵+全油门"), 1.5f, 1, 0, 1 } } },
+		{ TEXT("120km/h 蛇行"), 120.f, 4, { { TEXT("右"), 0.5f, 1, 0, 1 }, { TEXT("左"), 0.5f, 1, 0, -1 }, { TEXT("右"), 0.5f, 1, 0, 1 }, { TEXT("左"), 0.5f, 1, 0, -1 } } },
+		{ TEXT("80km/h S 弯（全油门）"), 80.f, 2, { { TEXT("右满舵"), 1.0f, 1, 0, 1 }, { TEXT("左满舵"), 1.0f, 1, 0, -1 } } },
+		{ TEXT("160km/h 高速弯全油门"), 160.f, 1, { { TEXT("满舵+全油门"), 2.0f, 1, 0, 1 } } },
+		{ TEXT("220km/h 变道"), 220.f, 2, { { TEXT("右"), 0.3f, 1, 0, 1 }, { TEXT("左"), 0.3f, 1, 0, -1 } } },
+		{ TEXT("250km/h 长弯半舵"), 250.f, 1, { { TEXT("半舵+全油门"), 2.0f, 1, 0, 0.5f } } },
+		// 车已经滑起来以后（被撞、压路肩、点手刹）还按着油门
+		{ TEXT("120km/h 被撞歪按住油门"), 120.f, 2, { { TEXT("横摆冲击70"), 0.05f, 1, 0, 0, 70.f }, { TEXT("油门松方向"), 1.5f, 1, 0, 0 } } },
+		{ TEXT("80km/h 被撞歪反打"), 80.f, 2, { { TEXT("横摆冲击90"), 0.05f, 1, 0, 0, 90.f }, { TEXT("反打+油门"), 0.8f, 1, 0, -1 } } },
+		{ TEXT("60km/h 点手刹过弯再给油"), 60.f, 2, { { TEXT("手刹+满舵"), 0.3f, 0.5f, 0, 1, 0, true }, { TEXT("满舵+全油门"), 1.5f, 1, 0, 1 } } },
+		{ TEXT("100km/h 点手刹再全油门"), 100.f, 2, { { TEXT("手刹+满舵"), 0.4f, 0.5f, 0, 1, 0, true }, { TEXT("全油门松方向"), 1.5f, 1, 0, 0 } } },
+	};
+	AApexDriftPlayerController* PC = Cast<AApexDriftPlayerController>(GetWorld()->GetFirstPlayerController());
+	AApexDriftVehiclePawn* Car = PC ? PC->GetVehiclePawn() : nullptr;
+	if (!Car) return;
+	if (GripCase >= UE_ARRAY_COUNT(Cases))
+	{
+		PadLog.Add(TEXT("==== 汇总"));
+		PadLog.Append(GripSummary);
+		Finish();
+		Phase = 3;
+		return;
+	}
+	const FGripCase& C = Cases[GripCase];
+	const FApexDriftTelemetry& Tel = Car->GetTelemetry();
+	if (GripStep < 0 && GripT <= 0.0f)
+	{
+		Car->ResetToTrack();
+		Car->SetActorTransform(FTransform(FRotator::ZeroRotator, FVector(-150000.0f, 0.0f, 150120.0f)), false, nullptr, ETeleportType::TeleportPhysics);
+		Car->GetMesh()->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Car->GetMesh()->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		GripPeak = GripPeakYaw = GripStepPeak = 0.0f;
+		GripCalmT = -1.0f;
+		GripSteps.Reset();
+		PadLog.Add(FString::Printf(TEXT("--- %s"), C.Name));
+	}
+	GripT += DeltaTime;
+	const float Slip = Tel.SpeedKmh > 8.0f ? Tel.SlipAngleDeg : 0.0f;
+	const float Yaw = Car->GetMesh()->GetPhysicsAngularVelocityInDegrees().Z;
+	float Thr = 1.0f, Brk = 0.0f, Str = 0.0f;
+	bool bNext = false, bHand = false;
+	const TCHAR* StepName = TEXT("加速");
+	if (GripStep < 0)
+	{
+		bNext = (GripT > 0.6f && Tel.SpeedKmh >= C.Kmh) || GripT > 16.0f;
+	}
+	else if (GripStep < C.N)
+	{
+		const FGripStep& S = C.S[GripStep];
+		StepName = S.Name;
+		Thr = S.Thr; Brk = S.Brk; Str = S.Str; bHand = S.bHand;
+		if (S.Kick != 0.0f && GripT <= DeltaTime) Car->GetMesh()->SetPhysicsAngularVelocityInDegrees(FVector(0, 0, S.Kick));
+		bNext = GripT >= S.Dur;
+	}
+	else
+	{
+		StepName = TEXT("松方向");
+		if (GripCalmT < 0.0f && FMath::Abs(Slip) < 3.0f && FMath::Abs(Yaw) < 6.0f) GripCalmT = GripT;
+		bNext = GripT >= 2.5f;
+	}
+	if (GripStep >= 0)
+	{
+		GripPeak = FMath::Max(GripPeak, FMath::Abs(Slip));
+		GripStepPeak = FMath::Max(GripStepPeak, FMath::Abs(Slip));
+		GripPeakYaw = FMath::Max(GripPeakYaw, FMath::Abs(Yaw));
+	}
+	Car->SetThrottleInput(Thr);
+	Car->SetBrakeInput(Brk);
+	Car->SetSteeringInput(Str);
+	Car->SetHandbrakeInput(bHand);
+	ShiftCooldown = FMath::Max(0.0f, ShiftCooldown - DeltaTime);
+	if (Tel.bManualGearbox && ShiftCooldown <= 0.0f && Tel.Gear > 0 && !bHand)
+	{
+		if (Tel.EngineRPM > Tel.MaxRPM * 0.90f) { Car->ShiftUp(); ShiftCooldown = 0.4f; }
+		else if (Tel.EngineRPM < Tel.MaxRPM * 0.42f && Tel.Gear > 1) { Car->ShiftDown(); ShiftCooldown = 0.4f; }
+	}
+	PadLogTimer += DeltaTime;
+	if (GripStep >= 0 && PadLogTimer >= 0.1f)
+	{
+		PadLogTimer = 0.0f;
+		PadLog.Add(FString::Printf(TEXT("  %-10s t=%.1f v=%.0f slip=%.1f yaw=%.0f 挡=%d rpm=%.0f 油=%.1f 刹=%.1f 方向=%.1f"), StepName, GripT, Tel.SpeedKmh, Slip, Yaw, Tel.Gear, Tel.EngineRPM, Thr, Brk, Str));
+		if (!Car->GetSimDebug().IsEmpty()) PadLog.Add(TEXT("      ") + Car->GetSimDebug());
+	}
+	if (!bNext) return;
+	if (GripStep >= 0 && GripStep < C.N)
+	{
+		GripSteps += FString::Printf(TEXT(" %s %.1f°/%.0f"), StepName, GripStepPeak, Tel.SpeedKmh);
+		GripStepPeak = 0.0f;
+	}
+	if (GripStep >= C.N)
+	{
+		const FString R = FString::Printf(TEXT("%-26s 最大侧滑 %5.1f° 横摆 %3.0f°/s，松手后%s，结束 slip %.1f v=%.0f |%s"), C.Name, GripPeak, GripPeakYaw,
+			GripCalmT >= 0.0f ? *FString::Printf(TEXT(" %.2fs 稳住"), GripCalmT) : TEXT("没稳住"), Slip, Tel.SpeedKmh, *GripSteps);
+		PadLog.Add(TEXT("=== ") + R);
+		GripSummary.Add(R);
+		++GripCase;
+		GripStep = -1;
+	}
+	else
+	{
+		++GripStep;
+	}
+	GripT = 0.0f;
+}
+
 void UApexBenchSubsystem::DriveRamps(float DeltaTime)
 {
 	struct FRampCase { const TCHAR* Name; float X, Y, Yaw, Kmh, Secs, Steer; };
@@ -775,6 +1073,16 @@ void UApexBenchSubsystem::DriveKeys(float DeltaTime)
 	Car->SetBrakeInput(S.Brk);
 	Car->SetSteeringInput(S.Str);
 	Car->SetHandbrakeInput(S.bHand);
+	{
+		const bool bHand = S.bHand;
+		// 手动挡：和跑圈机器人一样到红线升挡、转速太低降挡（手刹时不降）
+		ShiftCooldown = FMath::Max(0.0f, ShiftCooldown - DeltaTime);
+		if (Tel.bManualGearbox && ShiftCooldown <= 0.0f && Tel.Gear > 0 && !bHand)
+		{
+			if (Tel.EngineRPM > Tel.MaxRPM * 0.90f) { Car->ShiftUp(); ShiftCooldown = 0.4f; }
+			else if (Tel.EngineRPM < Tel.MaxRPM * 0.42f && Tel.Gear > 1) { Car->ShiftDown(); ShiftCooldown = 0.4f; }
+		}
+	}
 	const float YawRate = Car->GetMesh()->GetPhysicsAngularVelocityInDegrees().Z;
 	if (Car->IsDriftActive()) KeyDriftT += DeltaTime;
 	KeyMaxSlip = FMath::Max(KeyMaxSlip, FMath::Abs(Tel.SlipAngleDeg));
@@ -789,6 +1097,7 @@ void UApexBenchSubsystem::DriveKeys(float DeltaTime)
 	{
 		PadLogTimer = 0.0f;
 		PadLog.Add(FString::Printf(TEXT("  %5.2f %s v=%.0f gear=%d rpm=%.0f slip=%.1f drift=%d yaw=%.0f"), KeySegT, S.Name, Tel.SpeedKmh, Tel.Gear, Tel.EngineRPM, Tel.SlipAngleDeg, Car->IsDriftActive() ? 1 : 0, YawRate));
+		if (!Car->GetSimDebug().IsEmpty()) PadLog.Add(TEXT("      ") + Car->GetSimDebug());
 	}
 	if (KeySegT >= S.Dur)
 	{
@@ -813,8 +1122,10 @@ void UApexBenchSubsystem::Finish()
 	}
 	if (bMonkey)
 	{
-		const FString Line = FString::Printf(TEXT("%s 漂移次数=%d 最长连续漂移=%.2fs 漂移总时长=%.1fs/%.0fs 松手或反打后仍歪着的最长时间=%.2fs 复位=%d 掉头=%d"), *Label, DriftRuns, MaxDriftRun, DriftSeconds, Elapsed, MaxCrooked, Resets, Spins);
-		FFileHelper::SaveStringToFile(Line, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Bench/%s_monkey.txt"), *Label)), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		const FString Line = FString::Printf(TEXT("%s 漂移次数=%d 最长连续漂移=%.2fs 漂移总时长=%.1fs/%.0fs 松手或反打后仍歪着的最长时间=%.2fs 复位=%d 掉头=%d 跑了%.2fkm 抓地最大侧滑=%.0f"), *Label, DriftRuns, MaxDriftRun, DriftSeconds, Elapsed, MaxCrooked, Resets, Spins, Travelled * 1e-5f, MaxSlipGrip);
+		TArray<FString> Lines = { Line };
+		Lines.Append(MonkeyEvents);
+		FFileHelper::SaveStringArrayToFile(Lines, *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Bench/%s_monkey.txt"), *Label)), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 	}
 	auto Avg = [](const TArray<float>& A) { double S = 0.0; for (float V : A) S += V; return A.Num() ? static_cast<float>(S / A.Num()) : 0.0f; };
 	auto Pct = [](TArray<float> A, float P) { if (!A.Num()) return 0.0f; A.Sort(); return A[FMath::Clamp(FMath::FloorToInt(P * (A.Num() - 1)), 0, A.Num() - 1)]; };
@@ -831,13 +1142,28 @@ void UApexBenchSubsystem::Finish()
 	FIntPoint Size(0, 0);
 	if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport) Size = GEngine->GameViewport->Viewport->GetSizeXY();
 
+	// 实际用的超分（Shipping 没有日志，靠这个确认 DLSS 真的接上了）
+	const IConsoleVariable* DlssAvail = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ApexDLSS.Available"));
+	const IConsoleVariable* DlssOn = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ApexDLSS.Enable"));
+	const IConsoleVariable* DlssMode = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ApexDLSS.Mode"));
+	const bool bDlss = DlssAvail && DlssOn && DlssAvail->GetInt() == 1 && DlssOn->GetInt() != 0;
+	FString Upscaler = bDlss ? FString::Printf(TEXT("DLSS mode %d"), DlssMode ? DlssMode->GetInt() : -1)
+		: FString::Printf(TEXT("TSR (DLSS available %d)"), DlssAvail ? DlssAvail->GetInt() : -2);
+#if PLATFORM_WINDOWS
+	{
+		// DLSS 5（OptiScaler-NR）：现在实际的开关（启动值 + 本局快捷键切换）和启动时的次数；以 OptiScaler.log 为准
+		const ApexNeuralRendering::FSettings& Nr = ApexNeuralRendering::GetSettings();
+		if (Nr.Status != ApexNeuralRendering::EStatus::Missing) Upscaler += Nr.bRunningEnabled ? FString::Printf(TEXT(" + NR x%d"), Nr.PassesAtLaunch) : FString(TEXT(" + NR off"));
+	}
+#endif
+
 	const float AvgMs = Avg(FrameMs);
-	FString Json = FString::Printf(TEXT("{\n\"label\":\"%s\",\"viewport\":\"%dx%d\",\"seconds\":%.1f,\"frames\":%d,\n")
+	FString Json = FString::Printf(TEXT("{\n\"label\":\"%s\",\"upscaler\":\"%s\",\"viewport\":\"%dx%d\",\"seconds\":%.1f,\"frames\":%d,\n")
 		TEXT("\"avgFps\":%.1f,\"low1Fps\":%.1f,\"p50Ms\":%.2f,\"p95Ms\":%.2f,\"p99Ms\":%.2f,\"maxMs\":%.1f,\n")
 		TEXT("\"framesOver8.34ms\":%.4f,\"framesOver20ms\":%d,\n")
 		TEXT("\"avgGpuMs\":%.2f,\"p95GpuMs\":%.2f,\"avgGameThreadMs\":%.2f,\"avgRenderThreadMs\":%.2f,\"avgResFraction\":%.3f,\"minResFraction\":%.3f,\n")
 		TEXT("\"travelledM\":%.0f,\"maxSpeedKmh\":%.1f,\"resets\":%d,\"spins\":%d,\"maxSlipGripDeg\":%.1f,\"maxSlipDriftDeg\":%.1f,\"driftSeconds\":%.1f,\"maxLateralCm\":%.0f,\"offTrackSeconds\":%.1f,\"driftScore\":%d,\n\"series\":[\n"),
-		*Label, Size.X, Size.Y, Elapsed, FrameMs.Num(),
+		*Label, *Upscaler, Size.X, Size.Y, Elapsed, FrameMs.Num(),
 		AvgMs > 0.0f ? 1000.0f / AvgMs : 0.0f, Low1Fps, Pct(FrameMs, 0.5f), Pct(FrameMs, 0.95f), Pct(FrameMs, 0.99f), Sorted.Num() ? Sorted[0] : 0.0f,
 		FrameMs.Num() ? static_cast<float>(Over833) / FrameMs.Num() : 0.0f, Over20,
 		Avg(GpuMs), Pct(GpuMs, 0.95f), Avg(GameMs), Avg(RenderMs), Avg(ResFrac), Pct(ResFrac, 0.0f),

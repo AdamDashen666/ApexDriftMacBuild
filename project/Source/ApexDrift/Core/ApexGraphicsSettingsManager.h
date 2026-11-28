@@ -11,6 +11,9 @@ public:
 	static void ApplyAllSettings(UWorld* World, const UApexDriftSaveGame* SaveData, bool bApplyVideoMode = true);
 	static void ApplyGraphicsTier(UWorld* World, EApexGraphicsTier Tier);
 	static void ApplyResolutionScaling(UWorld* World, EApexTSRMode Mode, int32 FrameTargetIndex);
+	/** 0 = TSR，1 = NVIDIA DLSS（插件 ApexDLSS，只在 Windows）；DLSS 不可用时自动用 TSR */
+	static void ApplyUpscaler(int32 UpscalerIndex, EApexTSRMode Mode);
+	static bool IsDLSSAvailable();
 	static void ApplyMotionBlur(bool bEnabled);
 	static void ApplyVideoMode(int32 ResolutionIndex, int32 WindowModeIndex, bool bVSync);
 

@@ -56,6 +56,10 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Settings")
 	EApexTSRMode TSRMode = EApexTSRMode::AutoDynamic;
 
+	/** 超分技术：0 = TSR（引擎自带），1 = NVIDIA DLSS（要 RTX 显卡 + DX12，不可用时自动退回 TSR） */
+	UPROPERTY(BlueprintReadWrite, Category = "Settings")
+	int32 UpscalerIndex = 1;
+
 	/** 动态分辨率的目标帧率：0=120 1=144 2=165 3=240 */
 	UPROPERTY(BlueprintReadWrite, Category = "Settings")
 	int32 FrameTargetIndex = 1;
@@ -80,6 +84,10 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Settings")
 	bool bManualTransmission = false;
+
+	/** 拟真档的牵引力控制：不让油门把后轮踩空（只限油门，从不转车头）；车滑起来时也限，只有拉手刹时放开 */
+	UPROPERTY(BlueprintReadWrite, Category = "Settings")
+	bool bTractionControl = true;
 
 	UPROPERTY(BlueprintReadWrite, Category = "Settings")
 	float MasterVolume = 0.90f;

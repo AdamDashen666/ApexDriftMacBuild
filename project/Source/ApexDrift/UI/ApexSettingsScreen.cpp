@@ -6,6 +6,9 @@
 #include "Core/ApexKeyBindings.h"
 #include "Vehicle/ApexDriftVehiclePawn.h"
 #include "Audio/ApexVehicleAudioComponent.h"
+#if PLATFORM_WINDOWS
+#include "Core/ApexNeuralRenderingSettings.h"
+#endif
 
 using namespace ApexUI;
 using FGfx = FApexGraphicsSettingsManager;
@@ -15,6 +18,49 @@ namespace
 	constexpr float ControlW = 392.0f;
 	constexpr float KeyCapW = 150.0f;
 	constexpr int32 KeysTab = 3;
+
+#if PLATFORM_WINDOWS
+	// 能不能调：DLSS 可用 + OptiScaler 真的加载了 + 超分选的是 DLSS（神经渲染挂在 DLSS 之前跑）。
+	// 不按显卡名判断：OptiScaler 自带的 INT8 模型 RTX 30 起就能跑，只有 NVIDIA 的模型要 RTX 50（写在说明里）
+	FString NeuralRenderingDisabledWhy(const UApexDriftSaveGame& Save)
+	{
+		using namespace ApexNeuralRendering;
+		if (!FGfx::IsDLSSAvailable())
+		{
+			return TEXT("需要 NVIDIA RTX 显卡（DirectX 12）");
+		}
+		switch (GetSettings().Status)
+		{
+		case EStatus::Missing: return TEXT("没有装 DLSS 5 组件（OptiScaler-NR）");
+		case EStatus::ReadFailed: return TEXT("读不到 OptiScaler.ini");
+		default: break;
+		}
+		return Save.UpscalerIndex == 1 ? FString() : FString(TEXT("将超分技术设为 NVIDIA DLSS 后可用"));
+	}
+
+	// 行内说明写清楚“现在实际是什么”：开关能即时切换时立刻生效；不能时（刚装好的第一次启动）写明重启前后各是什么
+	FString NeuralRenderingEnabledDesc()
+	{
+		using namespace ApexNeuralRendering;
+		const FSettings& S = GetSettings();
+		if (S.Status == EStatus::WriteFailed) return TEXT("保存失败，请检查游戏目录权限后重试");
+		if (S.bLiveToggle) return S.bTogglePending ? FString(TEXT("正在切换…")) : FString(TEXT("立即生效，画面上会提示 On / Off"));
+		if (S.bEnabled != S.bEnabledAtLaunch)
+		{
+			return FString::Printf(TEXT("现在仍是%s，重启游戏后变为%s"), S.bEnabledAtLaunch ? TEXT("开") : TEXT("关"), S.bEnabled ? TEXT("开") : TEXT("关"));
+		}
+		return TEXT("这次启动改了要重启才生效");
+	}
+
+	FString NeuralRenderingPassesDesc()
+	{
+		using namespace ApexNeuralRendering;
+		const FSettings& S = GetSettings();
+		if (S.Status == EStatus::WriteFailed) return TEXT("保存失败，请检查游戏目录权限后重试");
+		if (S.Passes != S.PassesAtLaunch) return FString::Printf(TEXT("现在是 %d 次，重启游戏后变为 %d 次"), S.PassesAtLaunch, S.Passes);
+		return TEXT("改了要重启游戏才生效");
+	}
+#endif
 }
 
 void SApexSettings::Construct(const FArguments& InArgs)
@@ -42,10 +88,56 @@ void SApexSettings::Construct(const FArguments& InArgs)
 		Tier.Get = [](const UApexDriftSaveGame& S) { return static_cast<int32>(S.GraphicsTier); };
 		Tier.Set = [](UApexDriftSaveGame& S, int32 V) { S.GraphicsTier = static_cast<EApexGraphicsTier>(V); };
 
+#if PLATFORM_WINDOWS
+		FRow& Up = Pg.Rows.AddDefaulted_GetRef();
+		Up.Name = TEXT("超分技术");
+		Up.Desc = TEXT("用哪种技术把渲染分辨率还原到屏幕分辨率");
+		Up.Detail = TEXT("NVIDIA DLSS 要 RTX 显卡，画面更稳、细节更多；分辨率缩放选“原生 100%”时就是 DLAA（只抗锯齿，不降分辨率）。显卡不支持时自动用 TSR。");
+		Up.Options = { TEXT("TSR（引擎自带）"), TEXT("NVIDIA DLSS") };
+		Up.OptionDescs = { TEXT("所有显卡都能用"), TEXT("RTX 显卡专用，推荐") };
+		Up.Get = [](const UApexDriftSaveGame& S) { return (S.UpscalerIndex == 1 && FGfx::IsDLSSAvailable()) ? 1 : 0; };
+		Up.Set = [](UApexDriftSaveGame& S, int32 V) { S.UpscalerIndex = V; };
+		Up.DisabledWhy = [](const UApexDriftSaveGame&) { return FGfx::IsDLSSAvailable() ? FString() : FString(TEXT("需要 NVIDIA RTX 显卡（DirectX 12）")); };
+
+		FRow& Nr = Pg.Rows.AddDefaulted_GetRef();
+		Nr.Name = TEXT("DLSS 5 神经渲染");
+		Nr.Detail = TEXT("用 AI 增强赛道的光照、材质和细节，显卡负载明显增加（RTX 5070 每次约 2.8ms）。开关立即生效，画面上会提示 On / Off；刚装好后的第一次启动要先重启一次才能即时切换。由第三方 OptiScaler-NR 提供，NVIDIA 的模型需要 RTX 50 系列。");
+		Nr.Options = OnOff(TEXT("关"), TEXT("开"));
+		Nr.OptionDescs = { TEXT("使用游戏原有的光照和材质"), TEXT("启用 AI 光照和材质增强") };
+		Nr.DefaultChoice = 0;   // 很吃显卡，恢复默认时关掉
+		Nr.Get = [](const UApexDriftSaveGame&) { return ApexNeuralRendering::GetSettings().bEnabled ? 1 : 0; };
+		Nr.Set = [](UApexDriftSaveGame&, int32 V) { ApexNeuralRendering::SetEnabled(V != 0); };
+		Nr.DisabledWhy = NeuralRenderingDisabledWhy;
+		Nr.DynDesc = NeuralRenderingEnabledDesc;
+
+		FRow& NrPasses = Pg.Rows.AddDefaulted_GetRef();
+		NrPasses.Name = TEXT("神经渲染次数");
+		NrPasses.Detail = TEXT("每帧运行 AI 增强的次数。次数越多变化越明显，显卡负载按次数成倍增加。OptiScaler 只在启动时读次数，改完点下面的“立即重启生效”。");
+		NrPasses.Options = { TEXT("1 次"), TEXT("2 次"), TEXT("3 次") };
+		NrPasses.OptionDescs = { TEXT("默认，显卡负载最低"), TEXT("增强两遍，显卡负载增加"), TEXT("增强三遍，显卡负载最高") };
+		NrPasses.DefaultChoice = 0;
+		NrPasses.Get = [](const UApexDriftSaveGame&) { return ApexNeuralRendering::GetSettings().Passes - 1; };
+		NrPasses.Set = [](UApexDriftSaveGame&, int32 V) { ApexNeuralRendering::SetPasses(V + 1); };
+		NrPasses.DisabledWhy = [](const UApexDriftSaveGame& Profile)
+		{
+			const FString Why = NeuralRenderingDisabledWhy(Profile);
+			if (!Why.IsEmpty())
+			{
+				return Why;
+			}
+			return ApexNeuralRendering::GetSettings().bEnabled ? FString() : FString(TEXT("开启 DLSS 5 神经渲染后可调"));
+		};
+		NrPasses.DynDesc = NeuralRenderingPassesDesc;
+#endif
+
 		FRow& Tsr = Pg.Rows.AddDefaulted_GetRef();
 		Tsr.Name = TEXT("分辨率缩放");
 		Tsr.Desc = TEXT("降低渲染分辨率换取帧率，再超分还原");
-		Tsr.Detail = TEXT("用 TSR 超分辨率把较低的渲染分辨率还原到屏幕分辨率。");
+#if PLATFORM_WINDOWS
+		Tsr.Detail = TEXT("先用较低的分辨率渲染，再用 TSR 或 DLSS（见“超分技术”）还原到屏幕分辨率。");
+#else
+		Tsr.Detail = TEXT("先用较低的分辨率渲染，再用 TSR 还原到屏幕分辨率。");
+#endif
 		for (int32 i = 0; i < 5; ++i)
 		{
 			Tsr.Options.Add(FGfx::GetTSRLabel(static_cast<EApexTSRMode>(i)));
@@ -134,9 +226,19 @@ void SApexSettings::Construct(const FArguments& InArgs)
 		As.OptionDescs = {
 			TEXT("点手刹触发漂移，松方向或反打马上回正，不容易打转。"),
 			TEXT("低速满油满舵也会甩尾，可用角度更大；松方向或反打同样能收住。"),
-			TEXT("不锁漂移角：起漂、控角、收车靠自己，只保留防打转的底线稳定。") };
+			TEXT("轮胎物理（和地平线一样）：没有任何把车头拉回的辅助，甩出去要自己反打、收油，也能一直倒着滑。") };
 		As.Get = [](const UApexDriftSaveGame& S) { return static_cast<int32>(S.HandlingAssist); };
 		As.Set = [](UApexDriftSaveGame& S, int32 V) { S.HandlingAssist = static_cast<EApexHandlingAssist>(V); };
+
+		FRow& Tc = Pg.Rows.AddDefaulted_GetRef();
+		Tc.Name = TEXT("牵引力控制");
+		Tc.Desc = TEXT("拟真档：不让油门把后轮踩空");
+		Tc.Detail = TEXT("只限油门，从不转车头。车已经滑起来（压路肩、蹭墙、收油甩尾）时也照样限住空转，按着油门不会越甩越大；拉手刹甩尾、360 不受影响。想用油门保持漂移就关掉：关掉后全油门能把车尾踩出去，也更容易打转。");
+		Tc.Options = { TEXT("开"), TEXT("关") };
+		Tc.OptionDescs = { TEXT("正常开车不会被油门甩尾，滑起来自动少给油，起漂用手刹"), TEXT("后轮随便空转：油门就能甩尾、保持漂移，但更容易打转") };
+		Tc.Get = [](const UApexDriftSaveGame& S) { return S.bTractionControl ? 0 : 1; };
+		Tc.Set = [](UApexDriftSaveGame& S, int32 V) { S.bTractionControl = V == 0; };
+		Tc.DisabledWhy = [](const UApexDriftSaveGame& S) { return S.HandlingAssist == EApexHandlingAssist::SimulationRaw ? FString() : FString(TEXT("只在“拟真”档起作用")); };
 
 		FRow& Tr = Pg.Rows.AddDefaulted_GetRef();
 		Tr.Name = TEXT("变速箱");
@@ -216,6 +318,10 @@ SApexSettings::FLayout SApexSettings::Layout(const FVector2f& S) const
 		L.PerCol = (Pages[Tab].Rows.Num() + 1) / 2;
 		L.RowH = FMath::Min(84.0f, (S.Y - 150.0f - L.Y0) / FMath::Max(1, L.PerCol));
 	}
+	else if (Tab == 0)
+	{
+		L.RowH = FMath::Min(L.RowH, (S.Y - 146.0f - L.Y0) / FMath::Max(1, Pages[Tab].Rows.Num()));
+	}
 	return L;
 }
 
@@ -287,6 +393,12 @@ void SApexSettings::BuildItems(const FVector2f& S)
 	{
 		Put(IdDefaults, FApexRect(L.ListX + 8.0f, BY, 250.0f, 54.0f));
 	}
+#if PLATFORM_WINDOWS
+	if (Tab == 0 && ApexNeuralRendering::NeedsRestart())
+	{
+		Put(IdRestart, FApexRect(L.ListX + 278.0f, BY, 270.0f, 54.0f));   // DLSS 5 次数等要重启才生效的改动
+	}
+#endif
 	Put(IdBack, FApexRect(L.X0 + 8.0f, BY, 224.0f, 54.0f));
 	if (FocusId >= IdRow0 && RowOf(FocusId))
 	{
@@ -354,7 +466,7 @@ void SApexSettings::LivePreview() const
 	{
 		Pawn->VehicleAudioComp->ApplyVolumeSettings(Save->MasterVolume, Save->EngineVolume, Save->TireVolume, Save->SfxVolume);
 	}
-	Pawn->ApplyHandlingSettings(Save->HandlingAssist, Save->bManualTransmission, Save->BaseCameraFOV);
+	Pawn->ApplyHandlingSettings(Save->HandlingAssist, Save->bManualTransmission, Save->BaseCameraFOV, Save->bTractionControl);
 }
 
 void SApexSettings::StepChoice(const FRow& R, int32 Dir)
@@ -452,6 +564,21 @@ void SApexSettings::OnActivate(int32 Id, const FVector2f& LocalPos, bool bMouse)
 		RestoreDefaults();
 		return;
 	}
+	if (Id == IdRestart)
+	{
+#if PLATFORM_WINDOWS
+		if (PendingCommit >= 0.0f)
+		{
+			Commit(false);
+		}
+		if (!ApexNeuralRendering::RestartGame())
+		{
+			Notice = TEXT("没能自动重启，请手动关掉游戏再打开");
+			NoticeT = 4.0f;
+		}
+#endif
+		return;
+	}
 	if (CaptureRow >= 0)
 	{
 		// 等待按键时点了别处：只取消
@@ -516,13 +643,17 @@ void SApexSettings::RestoreDefaults()
 	bool bVideo = false;
 	for (const FRow& R : Pages[Tab].Rows)
 	{
+		if (!WhyDisabled(R).IsEmpty())
+		{
+			continue;   // 不可用的行不动（例如 DLSS 5 没装 / 没选 DLSS 时，不能被“恢复默认”悄悄写进配置）
+		}
 		if (R.Type == EType::Slider)
 		{
 			R.SetF(*Save, R.GetF(*Def));
 		}
 		else
 		{
-			const int32 D = R.Get(*Def);
+			const int32 D = R.DefaultChoice.Get(R.Get(*Def));
 			if (D != R.Get(*Save))
 			{
 				R.Set(*Save, D);
@@ -697,7 +828,7 @@ void SApexSettings::PaintDetail(FApexPainter& P, const FLayout& L, const FVector
 			: FString(TEXT("点这一行或按回车，再按想用的键。和别的动作重复时，两个动作的键会互换。")),
 			TX, Y, TW, EApexFont::Body, 17.0f, 28.0f, TextMid(), 3) * 28.0f + 14.0f;
 	}
-	if (NoticeT > 0.0f && Tab == KeysTab)
+	if (NoticeT > 0.0f)   // 改键结果、重启失败（切页时清掉）
 	{
 		P.TextWrap(Notice, TX, Y + 10.0f, TW, EApexFont::BodyBold, 19.0f, 30.0f, WithA(Accent, FMath::Min(1.0f, NoticeT * 2.0f)), 3);
 	}
@@ -712,7 +843,7 @@ void SApexSettings::PaintScreen(FApexPainter& P, const FVector2f& S) const
 	Backdrop(P, S, 22.0f, 0.84f);
 
 	ScreenTitle(P, L.X0, 96.0f, TEXT("设置"), TEXT("SETTINGS"), Accent, 60.0f);
-	P.Text(TEXT("改动立即生效并自动保存"), S.X - L.X0, 108.0f, EApexFont::Body, 17.0f, TextLow(), EApexH::Right);
+	P.Text(TEXT("改动自动保存"), S.X - L.X0, 108.0f, EApexFont::Body, 17.0f, TextLow(), EApexH::Right);
 
 	for (int32 i = 0; i < Pages.Num(); ++i)
 	{
@@ -740,6 +871,12 @@ void SApexSettings::PaintScreen(FApexPainter& P, const FVector2f& S) const
 		const FApexRect RD = RectOf(IdDefaults);
 		GhostButton(P, RD, TEXT("恢复本页默认"), EApexIcon::Restart, HoverOf(IdDefaults), PressOf(IdDefaults), 23.0f);
 		if (IsFocused(IdDefaults)) FocusRing(P, RD);
+	}
+	if (Find(IdRestart))
+	{
+		const FApexRect RR = RectOf(IdRestart);
+		GhostButton(P, RR, TEXT("立即重启生效"), EApexIcon::Restart, HoverOf(IdRestart), PressOf(IdRestart), 23.0f);
+		if (IsFocused(IdRestart)) FocusRing(P, RR);
 	}
 
 	if (CaptureRow >= 0)

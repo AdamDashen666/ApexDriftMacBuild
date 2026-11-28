@@ -117,9 +117,9 @@ FString FApexGraphicsSettingsManager::GetTSRLabel(EApexTSRMode Mode)
 	{
 	case EApexTSRMode::AutoDynamic:    return TEXT("动态分辨率（自动保帧）");
 	case EApexTSRMode::Native100:      return TEXT("原生 100%");
-	case EApexTSRMode::TSRQuality:     return TEXT("TSR 质量 67%");
-	case EApexTSRMode::TSRBalanced:    return TEXT("TSR 平衡 58%");
-	case EApexTSRMode::TSRPerformance: return TEXT("TSR 性能 50%");
+	case EApexTSRMode::TSRQuality:     return TEXT("质量 67%");
+	case EApexTSRMode::TSRBalanced:    return TEXT("平衡 58%");
+	case EApexTSRMode::TSRPerformance: return TEXT("性能 50%");
 	default:                           return TEXT("动态分辨率（自动保帧）");
 	}
 }
@@ -138,7 +138,15 @@ void FApexGraphicsSettingsManager::ApplyAllSettings(UWorld* World, const UApexDr
 		Tier = static_cast<EApexGraphicsTier>(TierArg);
 	}
 	ApplyGraphicsTier(World, Tier);
-	ApplyResolutionScaling(World, SaveData->TSRMode, SaveData->FrameTargetIndex);
+	// -ApexRes=0..4（动态 / 原生 / 质量 / 平衡 / 性能）临时换分辨率缩放，不改存档
+	EApexTSRMode ResMode = SaveData->TSRMode;
+	int32 ResArg = -1;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ApexRes="), ResArg) && ResArg >= 0 && ResArg <= static_cast<int32>(EApexTSRMode::TSRPerformance))
+	{
+		ResMode = static_cast<EApexTSRMode>(ResArg);
+	}
+	ApplyResolutionScaling(World, ResMode, SaveData->FrameTargetIndex);
+	ApplyUpscaler(SaveData->UpscalerIndex, ResMode);
 	ApplyMotionBlur(SaveData->bMotionBlur);
 	if (bApplyVideoMode)
 	{
@@ -253,6 +261,38 @@ void FApexGraphicsSettingsManager::ApplyResolutionScaling(UWorld* World, EApexTS
 	}
 	SetCVarInt(TEXT("r.DynamicRes.OperationMode"), 0);
 	SetCVarFloat(TEXT("r.ScreenPercentage"), Pct);
+}
+
+bool FApexGraphicsSettingsManager::IsDLSSAvailable()
+{
+	// 插件 ApexDLSS 初始化完会把它设成 1；Mac 版、非 NVIDIA 显卡没有这个变量或是 0
+	const IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ApexDLSS.Available"));
+	return Var && Var->GetInt() == 1;
+}
+
+void FApexGraphicsSettingsManager::ApplyUpscaler(int32 UpscalerIndex, EApexTSRMode Mode)
+{
+	// 跑分时 -ApexDLSS=0/1 临时换超分，不改存档
+	int32 Arg = -1;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ApexDLSS="), Arg))
+	{
+		UpscalerIndex = Arg != 0 ? 1 : 0;
+	}
+	const bool bDLSS = UpscalerIndex == 1 && IsDLSSAvailable();
+
+	// 渲染分辨率仍由屏幕百分比 / 动态分辨率决定；模式只决定 DLSS 用哪套模型。
+	// 动态分辨率固定用质量模式，分辨率在 50%–100% 之间变时不用重建 DLSS。
+	int32 DLSSMode = 2;
+	switch (Mode)
+	{
+	case EApexTSRMode::Native100:      DLSSMode = 1; break; // DLAA
+	case EApexTSRMode::TSRQuality:     DLSSMode = 2; break;
+	case EApexTSRMode::TSRBalanced:    DLSSMode = 3; break;
+	case EApexTSRMode::TSRPerformance: DLSSMode = 4; break;
+	default: break;
+	}
+	SetCVarInt(TEXT("r.ApexDLSS.Mode"), DLSSMode);
+	SetCVarInt(TEXT("r.ApexDLSS.Enable"), bDLSS ? 1 : 0);
 }
 
 void FApexGraphicsSettingsManager::ApplyMotionBlur(bool bEnabled)
